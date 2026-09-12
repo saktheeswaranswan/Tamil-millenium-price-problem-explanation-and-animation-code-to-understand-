@@ -1,0 +1,236 @@
+// Gauss Divergence Theorem Visualization - Fluid Dynamics
+// Designed for Android Processing Development Environment (APDE)
+// Demonstrates volumetric subdivision, internal flux cancellation, and total divergence.
+
+int subdivisions = 2; 
+float explodeFactor = 1.0;
+float cubeSize = 300;
+boolean showInterior = true;
+float totalOuterFlux = 0;
+float totalSummedFlux = 0;
+
+Slider subSlider, explodeSlider;
+Button viewToggleBtn;
+float rotX = PI/6, rotY = -PI/6;
+float prevTouchX, prevTouchY;
+
+void setup() {
+  size(displayWidth, displayHeight, P3D);
+  orientation(LANDSCAPE);
+  
+  // Initialize touch-compatible UI components
+  subSlider = new Slider(50, 50, 300, 40, 1, 6, 2, "Subdivisions");
+  explodeSlider = new Slider(50, 110, 300, 40, 1.0, 2.5, 1.2, "Expand Volume");
+  viewToggleBtn = new Button(50, 170, 200, 40, "Toggle Interior");
+}
+
+void draw() {
+  background(20);
+  
+  // Reset Flux Counters for the current frame
+  totalOuterFlux = 0;
+  totalSummedFlux = 0;
+  
+  // Evaluate the sliders
+  subdivisions = (int)subSlider.getValue();
+  explodeFactor = explodeSlider.getValue();
+  
+  // --------------------------------------------------------
+  // 3D Scene Rendering
+  // --------------------------------------------------------
+  pushMatrix();
+  translate(width/2 + 100, height/2, -200);
+  rotateX(rotX);
+  rotateY(rotY);
+  lights();
+  
+  float step = cubeSize / subdivisions;
+  float offset = -cubeSize / 2 + step / 2;
+  float patchArea = step * step;
+  
+  // Generate Sub-volumes (Voxels)
+  for (int x = 0; x < subdivisions; x++) {
+    for (int y = 0; y < subdivisions; y++) {
+      for (int z = 0; z < subdivisions; z++) {
+        
+        // Determine if this specific sub-cube is on the outer shell
+        boolean isOuter = (x == 0 || x == subdivisions - 1 || 
+                           y == 0 || y == subdivisions - 1 || 
+                           z == 0 || z == subdivisions - 1);
+                           
+        if (!showInterior && !isOuter) continue; // Skip rendering interior if toggled off
+        
+        // Base center of the sub-cube
+        PVector center = new PVector(offset + x * step, offset + y * step, offset + z * step);
+        
+        // Apply Explosion/Shrink logic to separate the cubes
+        PVector drawCenter = PVector.mult(center, explodeFactor);
+        
+        pushMatrix();
+        translate(drawCenter.x, drawCenter.y, drawCenter.z);
+        drawAndCalculateSubCube(center, step, patchArea, x, y, z);
+        popMatrix();
+      }
+    }
+  }
+  popMatrix();
+  
+  // --------------------------------------------------------
+  // 2D Heads-Up Display (HUD)
+  // --------------------------------------------------------
+  hint(DISABLE_DEPTH_TEST);
+  camera();
+  noLights();
+  
+  subSlider.display();
+  explodeSlider.display();
+  viewToggleBtn.display();
+  
+  fill(255);
+  textSize(22);
+  textAlign(LEFT, TOP);
+  text("Fluid Dynamics: Velocity Field Mass Flux", 50, 230);
+  
+  fill(255, 100, 100);
+  text("Red Patches = Outward Flux (F · n > 0)", 50, 270);
+  fill(100, 150, 255);
+  text("Blue Patches = Inward Flux (F · n < 0)", 50, 300);
+  
+  fill(255);
+  text("Total Net Flux (Outer Boundary Only): " + nf(totalOuterFlux, 0, 2), 50, 350);
+  text("Sum of All Internal & External Flux: " + nf(totalSummedFlux, 0, 2), 50, 380);
+  text("Observe that internal fluxes perfectly cancel out.", 50, 410);
+  
+  hint(ENABLE_DEPTH_TEST);
+}
+
+// Fluid Velocity Field Evaluation: Uniform Source Field
+// F(x,y,z) = <0.02x, 0.02y, 0.02z>
+PVector getFluidField(PVector pos) {
+  return new PVector(0.02 * pos.x, 0.02 * pos.y, 0.02 * pos.z);
+}
+
+void drawAndCalculateSubCube(PVector center, float size, float area, int idxX, int idxY, int idxZ) {
+  float r = size / 2;
+  
+  // Define the 6 faces: Normal vector and a flag indicating if it faces the absolute exterior
+  Object[][] faceData = {
+    {new PVector(0, 0, 1),  idxZ == subdivisions - 1}, // Front
+    {new PVector(0, 0, -1), idxZ == 0},                // Back
+    {new PVector(1, 0, 0),  idxX == subdivisions - 1}, // Right
+    {new PVector(-1, 0, 0), idxX == 0},                // Left
+    {new PVector(0, 1, 0),  idxY == subdivisions - 1}, // Bottom
+    {new PVector(0, -1, 0), idxY == 0}                 // Top
+  };
+  
+  for (int i = 0; i < 6; i++) {
+    PVector n = (PVector)faceData[i][0];
+    boolean isExteriorFace = (Boolean)faceData[i][1];
+    
+    // Evaluate field at face centroid
+    PVector faceCenter = new PVector(center.x + n.x * r, center.y + n.y * r, center.z + n.z * r);
+    PVector field = getFluidField(faceCenter);
+    
+    // Calculate scalar flux for this patch
+    float flux = field.dot(n) * area;
+    
+    // Accumulate into global counters
+    totalSummedFlux += flux;
+    if (isExteriorFace) {
+        totalOuterFlux += flux;
+    }
+    
+    // Render the face patch
+    pushMatrix();
+    translate(n.x * r, n.y * r, n.z * r);
+    
+    // Align geometry with normal vector
+    if (n.x != 0) { rotateY(HALF_PI); }
+    if (n.y != 0) { rotateX(HALF_PI); }
+    
+    if (flux > 0) fill(255, 50, 50, 180); // Red for outward
+    else fill(50, 150, 255, 180);         // Blue for inward
+    
+    rectMode(CENTER);
+    stroke(0);
+    strokeWeight(1);
+    rect(0, 0, size, size);
+    popMatrix();
+    
+    // Render the mathematical vectors
+    pushMatrix();
+    translate(n.x * r, n.y * r, n.z * r);
+    stroke(255, 255, 0); // Yellow for the Fluid Field Vector
+    strokeWeight(3);
+    line(0, 0, 0, field.x * 15, field.y * 15, field.z * 15);
+    
+    stroke(0, 255, 0); // Green for the Unit Normal Vector
+    strokeWeight(2);
+    line(0, 0, 0, n.x * 15, n.y * 15, n.z * 15);
+    popMatrix();
+  }
+}
+
+// Touch Input Handlers for dragging UI and rotating camera
+void mousePressed() {
+  prevTouchX = mouseX; prevTouchY = mouseY;
+  subSlider.checkTouch(mouseX, mouseY);
+  explodeSlider.checkTouch(mouseX, mouseY);
+  viewToggleBtn.checkTouch(mouseX, mouseY);
+}
+
+void mouseDragged() {
+  if (subSlider.isDragging) subSlider.update(mouseX);
+  else if (explodeSlider.isDragging) explodeSlider.update(mouseX);
+  else {
+    rotY += (mouseX - prevTouchX) * 0.01;
+    rotX -= (mouseY - prevTouchY) * 0.01;
+    prevTouchX = mouseX; prevTouchY = mouseY;
+  }
+}
+
+void mouseReleased() {
+  subSlider.isDragging = false; explodeSlider.isDragging = false;
+}
+
+// --------------------------------------------------------
+// Custom GUI Classes (No external libraries required)
+// --------------------------------------------------------
+class Slider {
+  float x, y, w, h, minVal, maxVal, currentVal; 
+  String label; boolean isDragging = false;
+  
+  Slider(float x, float y, float w, float h, float minVal, float maxVal, float startVal, String label) {
+    this.x = x; this.y = y; this.w = w; this.h = h; 
+    this.minVal = minVal; this.maxVal = maxVal; this.currentVal = startVal; this.label = label;
+  }
+  void display() {
+    fill(80); noStroke(); rectMode(CORNER); rect(x, y, w, h, 8);
+    float handleX = map(currentVal, minVal, maxVal, x, x + w);
+    fill(200); rect(handleX - 10, y - 5, 20, h + 10, 5);
+    fill(255); textSize(20); textAlign(LEFT, CENTER);
+    text(label + ": " + nf(currentVal, 1, 1), x + w + 20, y + h/2);
+  }
+  void checkTouch(float tx, float ty) {
+    if (tx >= x && tx <= x + w && ty >= y - 10 && ty <= y + h + 10) { isDragging = true; update(tx); }
+  }
+  void update(float tx) { currentVal = map(constrain(tx, x, x + w), x, x + w, minVal, maxVal); }
+  float getValue() { return currentVal; }
+}
+
+class Button {
+  float x, y, w, h; String label;
+  Button(float x, float y, float w, float h, String label) {
+    this.x = x; this.y = y; this.w = w; this.h = h; this.label = label;
+  }
+  void display() {
+    fill(showInterior ? 100 : 60); stroke(255); strokeWeight(2); rectMode(CORNER);
+    rect(x, y, w, h, 8);
+    fill(255); textSize(20); textAlign(CENTER, CENTER); text(label, x + w/2, y + h/2);
+  }
+  void checkTouch(float tx, float ty) {
+    if (tx >= x && tx <= x + w && ty >= y && ty <= y + h) {
+      showInterior = !showInterior; // Toggle state
+    }
+  }
+}
