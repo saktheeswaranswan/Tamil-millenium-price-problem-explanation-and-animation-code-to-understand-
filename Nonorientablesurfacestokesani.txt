@@ -1,0 +1,280 @@
+// Non-Orientable Surface Visualizer for APDE
+// The Möbius Strip: One Surface, One Boundary
+
+float time = 0;
+Button toggleVectorsBtn;
+boolean showVectors = true;
+
+// Strip dimensions
+float R = width * 0.35; // Main radius of the strip
+float W = R * 0.4;      // Half-width of the strip
+
+void setup() {
+  fullScreen(P3D);
+  orientation(PORTRAIT);
+  
+  // Initialize UI Button: label, x, y, width, height
+  toggleVectorsBtn = new Button("Toggle Normal Vectors", 50, 150, width - 100, 100);
+  
+  // Adjust sizes dynamically for screen
+  R = width * 0.35;
+  W = R * 0.4;
+}
+
+void draw() {
+  background(15, 15, 20); // Dark space background
+  time += 0.02;
+
+  // ==========================================
+  // 1. Draw 2D UI (Text and Buttons)
+  // ==========================================
+  hint(DISABLE_DEPTH_TEST);
+  camera();
+  noLights();
+  
+  fill(255);
+  textSize(55);
+  textAlign(LEFT, TOP);
+  text("Möbius Strip", 50, 40);
+  
+  textSize(30);
+  fill(200);
+  text("Non-Orientable Surface", 50, 105);
+  
+  toggleVectorsBtn.display();
+  
+  hint(ENABLE_DEPTH_TEST);
+
+  // ==========================================
+  // 2. Setup 3D Scene
+  // ==========================================
+  translate(width / 2, height / 2 + 150, 0);
+  
+  // Tilt to see the loop, and slowly spin the entire object
+  rotateX(PI / 2.5);
+  rotateZ(time * 0.3);
+
+  // Enable lighting for 3D depth
+  ambientLight(100, 100, 100);
+  directionalLight(255, 255, 255, 1, 1, -1);
+  lightFalloff(1, 0, 0);
+  lightSpecular(255, 255, 255);
+
+  // ==========================================
+  // 3. Draw Möbius Strip Surface
+  // ==========================================
+  // We use a single color. It has no "inside" or "outside".
+  fill(0, 200, 255, 180); // Translucent Cyan
+  noStroke();
+  
+  int uSteps = 60; // Steps around the circle (0 to 2PI)
+  int vSteps = 5;  // Steps across the width (-W to W)
+  
+  for (int i = 0; i < uSteps; i++) {
+    float u1 = map(i, 0, uSteps, 0, TWO_PI);
+    float u2 = map(i + 1, 0, uSteps, 0, TWO_PI);
+    
+    beginShape(TRIANGLE_STRIP);
+    for (int j = 0; j <= vSteps; j++) {
+      float v = map(j, 0, vSteps, -W, W);
+      
+      PVector p1 = getPosition(u1, v);
+      PVector p2 = getPosition(u2, v);
+      
+      vertex(p1.x, p1.y, p1.z);
+      vertex(p2.x, p2.y, p2.z);
+    }
+    endShape();
+  }
+
+  // ==========================================
+  // 4. Draw The Single Boundary
+  // ==========================================
+  // The boundary is one continuous line tracing v = W from 0 to 4*PI
+  noFill();
+  stroke(255, 50, 150); // Glowing Neon Pink
+  strokeWeight(8);
+  
+  beginShape();
+  for (float u = 0; u <= TWO_PI * 2; u += 0.1) {
+    // Tracing along one "edge" (v = W) actually traces the whole boundary
+    PVector p = getPosition(u, W);
+    vertex(p.x, p.y, p.z);
+  }
+  endShape(CLOSE);
+
+  // ==========================================
+  // 5. Draw Normal Vector Field (Toggleable)
+  // ==========================================
+  if (showVectors) {
+    stroke(255, 255, 0); // Yellow Arrows
+    strokeWeight(3);
+    for (int i = 0; i <= uSteps; i += 3) {
+      for (int j = 0; j <= vSteps; j += 2) {
+        float u = map(i, 0, uSteps, 0, TWO_PI);
+        float v = map(j, 0, vSteps, -W, W);
+        
+        PVector p = getPosition(u, v);
+        PVector n = getNormal(u, v);
+        
+        float arrowLen = 40;
+        line(p.x, p.y, p.z, p.x + n.x * arrowLen, p.y + n.y * arrowLen, p.z + n.z * arrowLen);
+        
+        // Small point at arrow head
+        pushMatrix();
+        translate(p.x + n.x * arrowLen, p.y + n.y * arrowLen, p.z + n.z * arrowLen);
+        noStroke();
+        fill(255, 255, 0);
+        box(4);
+        popMatrix();
+      }
+    }
+  }
+
+  // ==========================================
+  // 6. Draw the Crawling Ant
+  // ==========================================
+  // The ant takes 4*PI to complete one full cycle and return upright
+  float antU = (time * 1.5) % (TWO_PI * 2); 
+  
+  PVector antPos = getPosition(antU, 0);
+  PVector antTangent = getPosition(antU + 0.05, 0).sub(antPos).normalize();
+  PVector antNormal = getNormal(antU, 0);
+  // Cross product gets the "right" vector to create a full orientation basis
+  PVector antRight = antNormal.cross(antTangent).normalize();
+  
+  pushMatrix();
+  translate(antPos.x, antPos.y, antPos.z);
+  
+  // Apply a custom matrix to align the ant to the surface exactly
+  applyMatrix(
+    antTangent.x, antRight.x, antNormal.x, 0,
+    antTangent.y, antRight.y, antNormal.y, 0,
+    antTangent.z, antRight.z, antNormal.z, 0,
+    0,            0,          0,           1
+  );
+  
+  drawAnt();
+  popMatrix();
+}
+
+// ==========================================
+// Mathematical Functions for Möbius Strip
+// ==========================================
+
+// Calculates 3D position given angle (u) and width (v)
+PVector getPosition(float u, float v) {
+  float x = (R + v * cos(u / 2.0)) * cos(u);
+  float y = (R + v * cos(u / 2.0)) * sin(u);
+  float z = v * sin(u / 2.0);
+  return new PVector(x, y, z);
+}
+
+// Numerically calculates the perpendicular (Normal) vector
+PVector getNormal(float u, float v) {
+  float eps = 0.01;
+  PVector p = getPosition(u, v);
+  PVector pu = getPosition(u + eps, v).sub(p);
+  PVector pv = getPosition(u, v + eps).sub(p);
+  PVector n = pu.cross(pv);
+  n.normalize();
+  return n;
+}
+
+// ==========================================
+// Geometry Rendering Functions
+// ==========================================
+
+void drawAnt() {
+  noStroke();
+  
+  // Ant Body (3 segments)
+  fill(255, 100, 0); // Orange
+  
+  // Abdomen
+  pushMatrix();
+  translate(-15, 0, 5);
+  sphere(12);
+  popMatrix();
+  
+  // Thorax
+  pushMatrix();
+  translate(0, 0, 5);
+  sphere(9);
+  popMatrix();
+  
+  // Head
+  pushMatrix();
+  translate(15, 0, 5);
+  sphere(8);
+  
+  // Eyes
+  fill(255);
+  pushMatrix(); translate(4, 5, 4); sphere(2); popMatrix();
+  pushMatrix(); translate(4, -5, 4); sphere(2); popMatrix();
+  
+  // Antennae (pointing 'up' / +Z relative to the ant)
+  stroke(255);
+  strokeWeight(2);
+  line(0, 5, 5, 5, 15, 20);
+  line(0, -5, 5, 5, -15, 20);
+  popMatrix();
+  
+  // Legs (pointing 'down' / -Z towards the surface)
+  stroke(255, 150, 0);
+  strokeWeight(3);
+  for(int dx = -5; dx <= 5; dx += 10) {
+    line(dx, 8, 5, dx-5, 20, -5); // Right legs
+    line(dx, -8, 5, dx-5, -20, -5); // Left legs
+  }
+}
+
+// ==========================================
+// Touch Input Handling
+// ==========================================
+void mouseReleased() {
+  if (toggleVectorsBtn.isHit(mouseX, mouseY)) {
+    showVectors = !showVectors;
+    toggleVectorsBtn.active = showVectors;
+  }
+}
+
+// ==========================================
+// Mobile Touch-Friendly Button Class
+// ==========================================
+class Button {
+  float x, y, w, h;
+  String label;
+  boolean active = true;
+
+  Button(String label, float x, float y, float w, float h) {
+    this.label = label;
+    this.x = x; 
+    this.y = y; 
+    this.w = w; 
+    this.h = h;
+  }
+  
+  boolean isHit(float mx, float my) {
+    return (mx > x && mx < x + w && my > y && my < y + h);
+  }
+
+  void display() {
+    // Draw button background
+    if (active) {
+      fill(0, 150, 255); // Blue when ON
+    } else {
+      fill(80); // Gray when OFF
+    }
+    
+    stroke(255);
+    strokeWeight(3);
+    rect(x, y, w, h, 15); // Rounded corners
+    
+    // Draw button text
+    fill(255);
+    textSize(35);
+    textAlign(CENTER, CENTER);
+    text(label + ": " + (active ? "ON" : "OFF"), x + w / 2, y + h / 2 - 5);
+  }
+}
