@@ -1,0 +1,325 @@
+// Stokes' Theorem Visualizer for APDE
+// Circular Orientable Surface: Morphs from a flat circle to a Paraboloid
+// Now fully rotatable and draggable in 3D space!
+
+int numPatches = 1;
+float morphValue = 0;
+float time = 0;
+
+// 3D Camera Rotation Variables
+float rotX = PI / 2.5;
+float rotZ = 0;
+boolean isDraggingScene = false;
+
+Slider patchSlider;
+Slider morphSlider;
+Slider activeSlider = null; // Tracks which slider is currently being touched
+
+void setup() {
+  // Fullscreen 3D for Android/APDE
+  fullScreen(P3D);
+  orientation(PORTRAIT); 
+  
+  // Initialize sliders: label, x, y, width, min, max, start, isInteger
+  patchSlider = new Slider("Density", 50, 150, width - 100, 1, 10, 3, true);
+  morphSlider = new Slider("Morph", 50, 270, width - 100, 0, 1, 0, false);
+}
+
+void draw() {
+  background(15, 15, 20); // Dark background for laser contrast
+  time += 0.02;
+
+  // Gentle auto-rotation when the user isn't interacting
+  if (!isDraggingScene && activeSlider == null) {
+    rotZ += 0.003; 
+  }
+
+  // ==========================================
+  // 1. Draw 2D UI (Sliders and Text)
+  // ==========================================
+  hint(DISABLE_DEPTH_TEST); 
+  camera(); 
+  noLights();
+  
+  fill(255);
+  textSize(55);
+  textAlign(LEFT, TOP);
+  text("Stokes' Theorem", 50, 40);
+  
+  // Update slider variables for the 3D generation
+  numPatches = (int) patchSlider.value;
+  morphValue = morphSlider.value;
+  
+  // Display sliders
+  patchSlider.display();
+  morphSlider.display();
+  
+  hint(ENABLE_DEPTH_TEST);
+
+  // ==========================================
+  // 2. Setup 3D Scene
+  // ==========================================
+  // Shift down to leave room for the UI sliders
+  translate(width / 2, height / 2 + 150, 0);
+  
+  // Apply the interactive rotations
+  rotateX(rotX);
+  rotateZ(rotZ);
+
+  float surfaceRadius = width * 0.38; // Radius of the circular boundary
+  int rings = numPatches;             // Radial subdivisions
+  int sectors = numPatches * 4;       // Angular subdivisions to keep patches roughly square
+
+  // ==========================================
+  // 3. Draw Orientable Surface (Yellow Inside, Green Outside)
+  // ==========================================
+  
+  // Inner Shell (Yellow) - Offset slightly down along the Z-axis
+  pushMatrix();
+  translate(0, 0, -2);
+  fill(220, 255, 0, 150); // Transparent Yellow
+  noStroke();
+  drawParaboloid(surfaceRadius, rings, sectors, morphValue);
+  popMatrix();
+
+  // Outer Shell (Green) - Drawn on top
+  pushMatrix();
+  fill(0, 255, 100, 160); // Transparent Green
+  stroke(0, 200, 100, 80); 
+  strokeWeight(2);
+  drawParaboloid(surfaceRadius, rings, sectors, morphValue);
+  popMatrix();
+
+  // ==========================================
+  // 4. Draw Pink Circulations (Vector Field Curl)
+  // ==========================================
+  for (int i = 0; i < rings; i++) {
+    for (int j = 0; j < sectors; j++) {
+      // Find the center of this specific polar patch
+      float rMid = surfaceRadius * (i + 0.5) / rings;
+      float thetaMid = TWO_PI * (j + 0.5) / sectors;
+      float zMid = getZ(rMid, morphValue, surfaceRadius);
+      
+      // Scale arrow to fit neatly inside its wedge
+      float radialWidth = surfaceRadius / rings;
+      float arcWidth = rMid * TWO_PI / sectors;
+      float arrowRadius = min(radialWidth, arcWidth) * 0.35;
+
+      pushMatrix();
+      translate(rMid * cos(thetaMid), rMid * sin(thetaMid), zMid);
+      
+      // 1. Align X-axis radially
+      rotateZ(thetaMid);
+      // 2. Pitch the flat arrow up/down to match the mathematical slope of the paraboloid
+      float slope = getDzDr(rMid, morphValue, surfaceRadius);
+      rotateY(atan2(-slope, 1)); 
+
+      drawCurl(arrowRadius, time);
+      popMatrix();
+    }
+  }
+
+  // ==========================================
+  // 5. Draw Closed Curve C (Blinking Circular Boundary)
+  // ==========================================
+  float blink = 155 + 100 * sin(time * 6);
+  
+  // The boundary remains strictly at Z=0 regardless of the surface morph!
+  noFill();
+  stroke(255, 0, 50, blink * 0.3);
+  strokeWeight(15);
+  ellipse(0, 0, surfaceRadius * 2, surfaceRadius * 2);
+  
+  stroke(255, 50, 50, blink);
+  strokeWeight(5);
+  ellipse(0, 0, surfaceRadius * 2, surfaceRadius * 2);
+
+  // ==========================================
+  // 6. Draw 3D Laser Arrow rotating OVER the Boundary
+  // ==========================================
+  drawBoundaryArrow(surfaceRadius, time);
+}
+
+// ==========================================
+// Touch / Mouse Interaction Handlers
+// ==========================================
+
+void mousePressed() {
+  // Check if user tapped a slider first
+  if (patchSlider.isHit(mouseX, mouseY)) {
+    activeSlider = patchSlider;
+    activeSlider.update(mouseX);
+  } else if (morphSlider.isHit(mouseX, mouseY)) {
+    activeSlider = morphSlider;
+    activeSlider.update(mouseX);
+  } else {
+    // If no slider was tapped, lock onto scene rotation
+    isDraggingScene = true;
+  }
+}
+
+void mouseDragged() {
+  if (activeSlider != null) {
+    // Update the slider if we are dragging one
+    activeSlider.update(mouseX);
+  } else if (isDraggingScene) {
+    // Rotate the 3D scene based on drag distance
+    rotZ += (mouseX - pmouseX) * 0.01;
+    rotX -= (mouseY - pmouseY) * 0.01;
+  }
+}
+
+void mouseReleased() {
+  // Reset interaction states on release
+  activeSlider = null;
+  isDraggingScene = false;
+}
+
+
+// ==========================================
+// Mathematical Functions for the Paraboloid
+// ==========================================
+
+float getZ(float r, float morphVal, float maxR) {
+  float maxHeight = 300.0;
+  return morphVal * maxHeight * (1.0 - (r * r) / (maxR * maxR));
+}
+
+float getDzDr(float r, float morphVal, float maxR) {
+  float maxHeight = 300.0;
+  return morphVal * maxHeight * (-2.0 * r) / (maxR * maxR);
+}
+
+// ==========================================
+// Geometry Rendering Functions
+// ==========================================
+
+void drawParaboloid(float R, int rings, int sectors, float morphVal) {
+  for (int i = 0; i < rings; i++) {
+    float r1 = R * i / rings;
+    float r2 = R * (i + 1) / rings;
+    float z1 = getZ(r1, morphVal, R);
+    float z2 = getZ(r2, morphVal, R);
+
+    beginShape(QUAD_STRIP);
+    for (int j = 0; j <= sectors; j++) {
+      float theta = TWO_PI * j / sectors;
+      float c = cos(theta);
+      float s = sin(theta);
+      
+      vertex(r1 * c, r1 * s, z1);
+      vertex(r2 * c, r2 * s, z2);
+    }
+    endShape();
+  }
+}
+
+void drawCurl(float radius, float t) {
+  stroke(255, 20, 147); // Laser Pink
+  strokeWeight(3);
+  noFill();
+
+  pushMatrix();
+  rotateZ(t * 4); 
+
+  arc(0, 0, radius * 2, radius * 2, 0, PI * 1.5);
+
+  pushMatrix();
+  translate(radius, 0); 
+  rotateZ(HALF_PI);     
+  fill(255, 20, 147);
+  noStroke();
+  
+  float arrowSize = max(radius * 0.4, 4); 
+  triangle(0, -arrowSize/2, 0, arrowSize/2, -arrowSize, 0);
+  popMatrix();
+
+  popMatrix();
+}
+
+void drawBoundaryArrow(float R, float t) {
+  float speed = 1.2;
+  float angle = t * speed; 
+  
+  float px = R * cos(angle);
+  float py = R * sin(angle);
+  
+  pushMatrix();
+  translate(px, py, 0); 
+  rotateZ(angle + HALF_PI);
+  
+  float l = 40; 
+  float w = 15; 
+  
+  fill(255, 50, 50); 
+  noStroke();
+  beginShape(TRIANGLES);
+  // Sides
+  vertex(l, 0, 0); vertex(-l, w, w); vertex(-l, w, -w);
+  vertex(l, 0, 0); vertex(-l, w, -w); vertex(-l, -w, -w);
+  vertex(l, 0, 0); vertex(-l, -w, -w); vertex(-l, -w, w);
+  vertex(l, 0, 0); vertex(-l, -w, w); vertex(-l, w, w);
+  // Base
+  vertex(-l, w, w); vertex(-l, w, -w); vertex(-l, -w, -w);
+  vertex(-l, w, w); vertex(-l, -w, -w); vertex(-l, -w, w);
+  endShape();
+  
+  popMatrix();
+}
+
+// ==========================================
+// Mobile Touch-Friendly Slider Class
+// ==========================================
+class Slider {
+  float x, y, w, minVal, maxVal, value;
+  String label;
+  boolean isInt;
+
+  Slider(String label, float x, float y, float w, float minVal, float maxVal, float startVal, boolean isInt) {
+    this.label = label;
+    this.x = x; this.y = y; this.w = w; 
+    this.minVal = minVal; this.maxVal = maxVal; 
+    this.value = startVal; this.isInt = isInt;
+  }
+
+  // Hitbox check
+  boolean isHit(float mx, float my) {
+    return (mx > x - 40 && mx < x + w + 40 && my > y - 50 && my < y + 50);
+  }
+
+  // Set value strictly based on X position
+  void update(float mx) {
+    value = map(mx, x, x + w, minVal, maxVal);
+    value = constrain(value, minVal, maxVal);
+  }
+
+  void display() {
+    fill(255);
+    textSize(35);
+    textAlign(LEFT, BOTTOM);
+    
+    String valStr;
+    if (isInt) {
+      int r = (int)value;
+      int s = r * 4;
+      valStr = r + " rings, " + s + " sectors";
+    } else {
+      valStr = nf(value, 0, 2);
+    }
+    text(label + ": " + valStr, x, y - 25);
+
+    // Track
+    stroke(100);
+    strokeWeight(10);
+    strokeCap(ROUND);
+    line(x, y, x + w, y);
+
+    // Glowing Handle
+    float handleX = map(value, minVal, maxVal, x, x + w);
+    noStroke();
+    fill(0, 255, 100, 100);
+    ellipse(handleX, y, 70, 70);
+    fill(0, 255, 100);
+    ellipse(handleX, y, 40, 40);
+  }
+}
