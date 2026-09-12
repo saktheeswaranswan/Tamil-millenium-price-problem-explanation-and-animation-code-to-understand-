@@ -1,0 +1,225 @@
+// Gauss Divergence Theorem Visualization - Electrostatics & Gauss's Law
+// Designed for Android Processing Development Environment (APDE)
+// Demonstrates point charges, inverse square attenuation, and constant total flux.
+
+int subdivisions = 3; 
+float explodeFactor = 1.0;
+float cubeSize = 300;
+boolean showInterior = true;
+float totalOuterFlux = 0;
+float totalSummedFlux = 0;
+
+Slider subSlider, explodeSlider;
+Button viewToggleBtn;
+float rotX = PI/4, rotY = -PI/4;
+float prevTouchX, prevTouchY;
+
+void setup() {
+  size(displayWidth, displayHeight, P3D);
+  orientation(LANDSCAPE);
+  
+  subSlider = new Slider(50, 50, 300, 40, 1, 6, 3, "Subdivisions");
+  explodeSlider = new Slider(50, 110, 300, 40, 1.0, 3.0, 1.5, "Expand Volume");
+  viewToggleBtn = new Button(50, 170, 200, 40, "Toggle Interior");
+}
+
+void draw() {
+  background(10, 15, 30); // Deep background for electrostatic glow
+  
+  totalOuterFlux = 0;
+  totalSummedFlux = 0;
+  
+  // --------------------------------------------------------
+  // HUD Rendering
+  // --------------------------------------------------------
+  hint(DISABLE_DEPTH_TEST);
+  camera();
+  noLights();
+  
+  subSlider.display();
+  explodeSlider.display();
+  viewToggleBtn.display();
+  
+  fill(255);
+  textSize(22);
+  textAlign(LEFT, TOP);
+  text("Electrostatics: Point Charge & Gauss's Law", 50, 230);
+  text("Field attenuation (1/r²) perfectly balances area expansion (r²)", 50, 260);
+  
+  fill(255);
+  text("Total Net E-Flux (Outer Shell): " + nf(totalOuterFlux, 0, 1), 50, 310);
+  text("Total Summed Flux (Internal faces cancel): " + nf(totalSummedFlux, 0, 1), 50, 340);
+  hint(ENABLE_DEPTH_TEST);
+  
+  // --------------------------------------------------------
+  // 3D Rendering
+  // --------------------------------------------------------
+  translate(width/2 + 100, height/2, -200);
+  rotateX(rotX);
+  rotateY(rotY);
+  lights();
+  
+  // Render the central point charge
+  pushMatrix();
+  noStroke();
+  fill(255, 255, 100);
+  sphere(15);
+  popMatrix();
+  
+  subdivisions = (int)subSlider.getValue();
+  explodeFactor = explodeSlider.getValue();
+  
+  float step = cubeSize / subdivisions;
+  float offset = -cubeSize / 2 + step / 2;
+  float patchArea = step * step;
+  
+  for (int x = 0; x < subdivisions; x++) {
+    for (int y = 0; y < subdivisions; y++) {
+      for (int z = 0; z < subdivisions; z++) {
+        
+        boolean isOuter = (x == 0 || x == subdivisions - 1 || 
+                           y == 0 || y == subdivisions - 1 || 
+                           z == 0 || z == subdivisions - 1);
+                           
+        if (!showInterior && !isOuter) continue;
+        
+        PVector center = new PVector(offset + x * step, offset + y * step, offset + z * step);
+        PVector drawCenter = PVector.mult(center, explodeFactor);
+        
+        pushMatrix();
+        translate(drawCenter.x, drawCenter.y, drawCenter.z);
+        drawElectricVoxel(center, step, patchArea, x, y, z, isOuter);
+        popMatrix();
+      }
+    }
+  }
+}
+
+// Electric Field Evaluation: E = k * (q / r^2) * r_hat
+PVector getElectricField(PVector pos) {
+  float k = 80000.0; // Scaled electrostatic constant for visualization
+  float rSq = pos.x*pos.x + pos.y*pos.y + pos.z*pos.z;
+  
+  if (rSq < 1) return new PVector(0,0,0); // Avoid singularity directly at origin
+  
+  float r = sqrt(rSq);
+  PVector rHat = new PVector(pos.x/r, pos.y/r, pos.z/r);
+  float magnitude = k / rSq;
+  
+  return PVector.mult(rHat, magnitude);
+}
+
+void drawElectricVoxel(PVector center, float size, float area, int idxX, int idxY, int idxZ, boolean isOuterVoxel) {
+  float r = size / 2;
+  
+  Object[][] faceData = {
+    {new PVector(0, 0, 1),  idxZ == subdivisions - 1}, 
+    {new PVector(0, 0, -1), idxZ == 0},                
+    {new PVector(1, 0, 0),  idxX == subdivisions - 1}, 
+    {new PVector(-1, 0, 0), idxX == 0},                
+    {new PVector(0, 1, 0),  idxY == subdivisions - 1}, 
+    {new PVector(0, -1, 0), idxY == 0}                 
+  };
+  
+  for (int i = 0; i < 6; i++) {
+    PVector n = (PVector)faceData[i][0];
+    boolean isExteriorFace = (Boolean)faceData[i][1];
+    
+    PVector faceCenter = new PVector(center.x + n.x * r, center.y + n.y * r, center.z + n.z * r);
+    PVector field = getElectricField(faceCenter);
+    
+    float flux = field.dot(n) * area;
+    
+    totalSummedFlux += flux;
+    if (isExteriorFace) {
+        totalOuterFlux += flux;
+    }
+    
+    // Map transparency to emphasize patches with high electric flux
+    float alpha = constrain(map(abs(flux), 0, 1500, 20, 255), 30, 255);
+    
+    pushMatrix();
+    translate(n.x * r, n.y * r, n.z * r);
+    
+    if (n.x != 0) { rotateY(HALF_PI); }
+    if (n.y != 0) { rotateX(HALF_PI); }
+    
+    if (flux > 0) fill(255, 100, 50, alpha); // Orange/Red for outward E-flux
+    else fill(50, 200, 255, alpha);          // Cyan/Blue for inward E-flux
+    
+    rectMode(CENTER);
+    stroke(255, 60); // Ghostly structural lines
+    strokeWeight(1);
+    rect(0, 0, size, size);
+    popMatrix();
+    
+    // Draw Electric Field Vectors
+    pushMatrix();
+    translate(n.x * r, n.y * r, n.z * r);
+    stroke(255, 200); // White field vectors
+    strokeWeight(2);
+    
+    // Cap rendering vector length for visual sanity near the singularity
+    PVector drawField = field.copy();
+    drawField.mult(0.1); 
+    if (drawField.mag() > size*1.5) drawField.setMag(size*1.5);
+    line(0, 0, 0, drawField.x, drawField.y, drawField.z);
+    
+    popMatrix();
+  }
+}
+
+// UI and Touch Methods (Identical to Fluid Dynamics Exhibit A)
+void mousePressed() {
+  prevTouchX = mouseX; prevTouchY = mouseY;
+  subSlider.checkTouch(mouseX, mouseY);
+  explodeSlider.checkTouch(mouseX, mouseY);
+  viewToggleBtn.checkTouch(mouseX, mouseY);
+}
+void mouseDragged() {
+  if (subSlider.isDragging) subSlider.update(mouseX);
+  else if (explodeSlider.isDragging) explodeSlider.update(mouseX);
+  else {
+    rotY += (mouseX - prevTouchX) * 0.01;
+    rotX -= (mouseY - prevTouchY) * 0.01;
+    prevTouchX = mouseX; prevTouchY = mouseY;
+  }
+}
+void mouseReleased() {
+  subSlider.isDragging = false; explodeSlider.isDragging = false;
+}
+
+class Slider {
+  float x, y, w, h, minVal, maxVal, currentVal; String label; boolean isDragging = false;
+  Slider(float x, float y, float w, float h, float minVal, float maxVal, float startVal, String label) {
+    this.x = x; this.y = y; this.w = w; this.h = h; this.minVal = minVal; this.maxVal = maxVal;
+    this.currentVal = startVal; this.label = label;
+  }
+  void display() {
+    fill(80); noStroke(); rectMode(CORNER); rect(x, y, w, h, 8);
+    float handleX = map(currentVal, minVal, maxVal, x, x + w);
+    fill(200); rect(handleX - 10, y - 5, 20, h + 10, 5);
+    fill(255); textSize(20); textAlign(LEFT, CENTER);
+    text(label + ": " + nf(currentVal, 1, 1), x + w + 20, y + h/2);
+  }
+  void checkTouch(float tx, float ty) {
+    if (tx >= x && tx <= x + w && ty >= y - 10 && ty <= y + h + 10) { isDragging = true; update(tx); }
+  }
+  void update(float tx) { currentVal = map(constrain(tx, x, x + w), x, x + w, minVal, maxVal); }
+  float getValue() { return currentVal; }
+}
+
+class Button {
+  float x, y, w, h; String label;
+  Button(float x, float y, float w, float h, String label) {
+    this.x = x; this.y = y; this.w = w; this.h = h; this.label = label;
+  }
+  void display() {
+    fill(showInterior ? 100 : 60); stroke(255); strokeWeight(2); rectMode(CORNER);
+    rect(x, y, w, h, 8);
+    fill(255); textSize(20); textAlign(CENTER, CENTER); text(label, x + w/2, y + h/2);
+  }
+  void checkTouch(float tx, float ty) {
+    if (tx >= x && tx <= x + w && ty >= y && ty <= y + h) { showInterior = !showInterior; }
+  }
+}
