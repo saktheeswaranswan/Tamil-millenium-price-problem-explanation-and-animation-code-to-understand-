@@ -1,0 +1,3517 @@
+/* =================================================================
+   FLUID FLOW LAB
+   3D VECTOR FIELD + STREAMLINES + STREAKLINES + PATHLINES
+   CURL FANS + FLUX PRISMS + 3D PLANES
+   PROCESSING P3D / APDE ANDROID
+
+   COLOUR LEGEND
+   -----------------------------------------------------------------
+   CYAN       = STREAMLINES
+   RED        = STREAKLINE
+   YELLOW     = INDIVIDUAL PARTICLE PATHLINE
+   WHITE      = VELOCITY VECTORS
+   ORANGE     = CURL FAN
+   GREEN      = POSITIVE DIVERGENCE
+   BLUE       = NEGATIVE DIVERGENCE
+
+   CONTROLS
+   -----------------------------------------------------------------
+   TOP -> BOTTOM
+       Creates many streamlines from the top boundary.
+
+   LEFT -> RIGHT
+       Creates many streamlines from the left boundary.
+
+   RANDOM
+       Creates randomly seeded streamlines.
+
+   STREAMLINES SLIDER
+       Controls number of seeded streamlines.
+
+   TRACE LENGTH SLIDER
+       Controls visible streamline / particle trail length.
+
+   SEED DENSITY SLIDER
+       Controls seed spread.
+
+   PLANE BUTTON
+       XY -> YZ -> ZX
+
+   TOUCH EMPTY 3D PLANE
+       First touch = point A
+       Second touch = point B
+
+       A = yellow sphere
+       B = pink sphere
+       Yellow trajectory = particle path
+
+   Touching A also creates:
+       - a streakline source
+       - a curl fan
+
+   CLEAR
+       Clears streamlines, particles, fans and selected points.
+================================================================= */
+
+
+/* ================================================================
+   CAMERA
+================================================================ */
+
+float camRotX = 0.50f;
+float camRotY = -0.50f;
+float camZoom = 250.0f;
+
+float lastMouseX;
+float lastMouseY;
+
+boolean touching = false;
+boolean isDraggingUI = false;
+
+long tapStartTime;
+PVector tapStartPos;
+
+
+/* ================================================================
+   TIME
+================================================================ */
+
+float flowTime = 0;
+
+
+/* ================================================================
+   VECTOR FIELD OBJECTS
+================================================================ */
+
+ArrayList<FluxPrism> prisms;
+ArrayList<CurlFan> fans;
+
+
+/* ================================================================
+   STREAMLINE / PARTICLE SYSTEMS
+================================================================ */
+
+ArrayList<Streamline> streamlines;
+ArrayList<StreakParticle> streakParticles;
+ArrayList<PathParticle> pathParticles;
+
+
+/* ================================================================
+   ACTIVE PLANE
+
+   0 = XY
+   1 = YZ
+   2 = ZX
+================================================================ */
+
+int activePlaneMode = 0;
+
+
+/* ================================================================
+   FLOW DIRECTION
+
+   0 = normal/random field
+   1 = TOP -> BOTTOM
+   2 = LEFT -> RIGHT
+================================================================ */
+
+int flowDirectionMode = 0;
+
+
+/* ================================================================
+   TWO POINT TRACE
+================================================================ */
+
+PVector pointA = null;
+PVector pointB = null;
+
+boolean waitingForSecondPoint = false;
+
+
+/* ================================================================
+   STREAK SOURCE
+================================================================ */
+
+PVector streakSource = new PVector(0, 0, 0);
+
+
+/* ================================================================
+   SLIDERS
+================================================================ */
+
+ArrayList<Slider> sliders;
+
+Slider slDiv;
+Slider slCurl;
+Slider slScale;
+Slider slSpeed;
+
+Slider slStreamCount;
+Slider slTraceLength;
+Slider slDensity;
+
+
+/* ================================================================
+   WORLD SETTINGS
+================================================================ */
+
+float WORLD = 120.0f;
+
+
+/* ================================================================
+   PROCESSING SETTINGS
+================================================================ */
+
+void settings() {
+  size(1080, 720, P3D);
+  smooth(4);
+}
+
+
+/* ================================================================
+   SETUP
+================================================================ */
+
+void setup() {
+
+  orientation(LANDSCAPE);
+
+  /* --------------------------------------------------------------
+     CREATE COLLECTIONS
+  -------------------------------------------------------------- */
+
+  prisms = new ArrayList<FluxPrism>();
+  fans = new ArrayList<CurlFan>();
+
+  streamlines = new ArrayList<Streamline>();
+  streakParticles = new ArrayList<StreakParticle>();
+  pathParticles = new ArrayList<PathParticle>();
+
+  sliders = new ArrayList<Slider>();
+
+
+  /* --------------------------------------------------------------
+     FIELD SLIDERS
+  -------------------------------------------------------------- */
+
+  slDiv =
+    new Slider(
+      "Divergence",
+      20,
+      25,
+      190,
+      0,
+      80,
+      35
+      );
+
+  slCurl =
+    new Slider(
+      "Curl",
+      20,
+      70,
+      190,
+      0,
+      80,
+      40
+      );
+
+  slScale =
+    new Slider(
+      "Field Scale",
+      20,
+      115,
+      190,
+      10,
+      100,
+      45
+      );
+
+  slSpeed =
+    new Slider(
+      "Flow Speed",
+      20,
+      160,
+      190,
+      0.002f,
+      0.05f,
+      0.015f
+      );
+
+
+  /* --------------------------------------------------------------
+     STREAMLINE CONTROLS
+  -------------------------------------------------------------- */
+
+  slStreamCount =
+    new Slider(
+      "Streamlines",
+      20,
+      215,
+      190,
+      3,
+      80,
+      25
+      );
+
+  slTraceLength =
+    new Slider(
+      "Trace Length",
+      20,
+      260,
+      190,
+      10,
+      150,
+      70
+      );
+
+  slDensity =
+    new Slider(
+      "Seed Density",
+      20,
+      305,
+      190,
+      5,
+      50,
+      15
+      );
+
+
+  sliders.add(slDiv);
+  sliders.add(slCurl);
+  sliders.add(slScale);
+  sliders.add(slSpeed);
+
+  sliders.add(slStreamCount);
+  sliders.add(slTraceLength);
+  sliders.add(slDensity);
+
+
+  /* --------------------------------------------------------------
+     INITIAL FLUX PRISMS
+  -------------------------------------------------------------- */
+
+  prisms.add(
+    new FluxPrism(
+      new PVector(-40, -40, -40),
+      30,
+      30,
+      30
+      )
+    );
+
+  prisms.add(
+    new FluxPrism(
+      new PVector(40, 40, 40),
+      30,
+      30,
+      30
+      )
+    );
+
+
+  /* --------------------------------------------------------------
+     INITIAL CURL FAN
+  -------------------------------------------------------------- */
+
+  fans.add(
+    new CurlFan(
+      new PVector(0, 0, 0)
+      )
+    );
+
+
+  /* --------------------------------------------------------------
+     INITIAL STREAMLINES
+  -------------------------------------------------------------- */
+
+  generateRandomStreamlines();
+
+
+  /* --------------------------------------------------------------
+     INITIAL STREAKLINE SOURCE
+  -------------------------------------------------------------- */
+
+  streakSource.set(0, 0, 0);
+
+
+  /* --------------------------------------------------------------
+     CREATE INITIAL STREAK PARTICLES
+  -------------------------------------------------------------- */
+
+  createStreakParticles();
+}
+
+
+/* ================================================================
+   MAIN DRAW
+================================================================ */
+
+void draw() {
+
+  background(12, 18, 28);
+
+  flowTime += slSpeed.val;
+
+
+  /* ============================================================== 
+     3D WORLD
+  ============================================================== */
+
+  pushMatrix();
+
+  translate(
+    width / 2.0f,
+    height / 2.0f,
+    -camZoom
+    );
+
+  rotateX(camRotX);
+  rotateY(camRotY);
+
+
+  /* --------------------------------------------------------------
+     PLANES
+  -------------------------------------------------------------- */
+
+  drawPlanes();
+
+
+  /* --------------------------------------------------------------
+     VECTOR FIELD
+  -------------------------------------------------------------- */
+
+  drawVectorField();
+
+
+  /* --------------------------------------------------------------
+     FLUX PRISMS
+  -------------------------------------------------------------- */
+
+  for (FluxPrism p : prisms) {
+    p.update();
+    p.draw();
+  }
+
+
+  /* --------------------------------------------------------------
+     CURL FANS
+  -------------------------------------------------------------- */
+
+  for (CurlFan f : fans) {
+    f.update();
+    f.draw();
+  }
+
+
+  /* --------------------------------------------------------------
+     STREAMLINES
+  -------------------------------------------------------------- */
+
+  for (Streamline s : streamlines) {
+    s.update();
+    s.draw();
+  }
+
+
+  /* --------------------------------------------------------------
+     STREAK PARTICLES
+  -------------------------------------------------------------- */
+
+  for (StreakParticle p : streakParticles) {
+    p.update();
+    p.draw();
+  }
+
+
+  /* --------------------------------------------------------------
+     PATH PARTICLES
+  -------------------------------------------------------------- */
+
+  for (PathParticle p : pathParticles) {
+    p.update();
+    p.draw();
+  }
+
+
+  /* --------------------------------------------------------------
+     SELECTED POINTS
+  -------------------------------------------------------------- */
+
+  drawSelectedPoints();
+
+
+  popMatrix();
+
+
+  /* ============================================================== 
+     2D HUD
+  ============================================================== */
+
+  drawHUD();
+}
+
+
+/* ================================================================
+   VECTOR FIELD
+================================================================ */
+
+PVector getVelocity(
+  float x,
+  float y,
+  float z,
+  float t
+  ) {
+
+  float S = max(slScale.val, 1.0f);
+
+  float D = slDiv.val;
+  float C = slCurl.val;
+
+
+  /* --------------------------------------------------------------
+     SMOOTH 3D FIELD
+
+     Curl producing terms:
+         Vx = sin(z)
+         Vy = sin(x)
+         Vz = sin(y)
+
+     Divergence terms:
+         Vx = sin(x)
+         Vy = sin(y)
+         Vz = sin(z)
+  -------------------------------------------------------------- */
+
+  float vx =
+    C * sin(z / S + t)
+    +
+    D * sin(x / S);
+
+  float vy =
+    C * sin(x / S + t)
+    +
+    D * sin(y / S);
+
+  float vz =
+    C * sin(y / S + t)
+    +
+    D * sin(z / S);
+
+
+  /* --------------------------------------------------------------
+     TOP -> BOTTOM
+  -------------------------------------------------------------- */
+
+  if (flowDirectionMode == 1) {
+
+    /*
+       Negative Y represents downward motion
+       in the displayed world.
+    */
+
+    vy -= 35.0f;
+  }
+
+
+  /* --------------------------------------------------------------
+     LEFT -> RIGHT
+  -------------------------------------------------------------- */
+
+  if (flowDirectionMode == 2) {
+
+    vx += 35.0f;
+  }
+
+
+  return new PVector(vx, vy, vz);
+}
+
+
+/* ================================================================
+   DIVERGENCE
+================================================================ */
+
+float getDivergence(
+  float x,
+  float y,
+  float z,
+  float t
+  ) {
+
+  float h = 1.0f;
+
+
+  float dVx =
+    (
+      getVelocity(
+        x + h,
+        y,
+        z,
+        t
+        ).x
+      -
+      getVelocity(
+        x - h,
+        y,
+        z,
+        t
+        ).x
+      )
+    /
+    (2.0f * h);
+
+
+  float dVy =
+    (
+      getVelocity(
+        x,
+        y + h,
+        z,
+        t
+        ).y
+      -
+      getVelocity(
+        x,
+        y - h,
+        z,
+        t
+        ).y
+      )
+    /
+    (2.0f * h);
+
+
+  float dVz =
+    (
+      getVelocity(
+        x,
+        y,
+        z + h,
+        t
+        ).z
+      -
+      getVelocity(
+        x,
+        y,
+        z - h,
+        t
+        ).z
+      )
+    /
+    (2.0f * h);
+
+
+  return dVx + dVy + dVz;
+}
+
+
+/* ================================================================
+   CURL
+================================================================ */
+
+PVector getCurl(
+  float x,
+  float y,
+  float z,
+  float t
+  ) {
+
+  float h = 1.0f;
+
+
+  float dVz_dy =
+    (
+      getVelocity(
+        x,
+        y + h,
+        z,
+        t
+        ).z
+      -
+      getVelocity(
+        x,
+        y - h,
+        z,
+        t
+        ).z
+      )
+    /
+    (2.0f * h);
+
+
+  float dVy_dz =
+    (
+      getVelocity(
+        x,
+        y,
+        z + h,
+        t
+        ).y
+      -
+      getVelocity(
+        x,
+        y,
+        z - h,
+        t
+        ).y
+      )
+    /
+    (2.0f * h);
+
+
+  float dVx_dz =
+    (
+      getVelocity(
+        x,
+        y,
+        z + h,
+        t
+        ).x
+      -
+      getVelocity(
+        x,
+        y,
+        z - h,
+        t
+        ).x
+      )
+    /
+    (2.0f * h);
+
+
+  float dVz_dx =
+    (
+      getVelocity(
+        x + h,
+        y,
+        z,
+        t
+        ).z
+      -
+      getVelocity(
+        x - h,
+        y,
+        z,
+        t
+        ).z
+      )
+    /
+    (2.0f * h);
+
+
+  float dVy_dx =
+    (
+      getVelocity(
+        x + h,
+        y,
+        z,
+        t
+        ).y
+      -
+      getVelocity(
+        x - h,
+        y,
+        z,
+        t
+        ).y
+      )
+    /
+    (2.0f * h);
+
+
+  float dVx_dy =
+    (
+      getVelocity(
+        x,
+        y + h,
+        z,
+        t
+        ).x
+      -
+      getVelocity(
+        x,
+        y - h,
+        z,
+        t
+        ).x
+      )
+    /
+    (2.0f * h);
+
+
+  return new PVector(
+    dVz_dy - dVy_dz,
+    dVx_dz - dVz_dx,
+    dVy_dx - dVx_dy
+    );
+}
+
+
+/* ================================================================
+   RANDOM STREAMLINE GENERATION
+================================================================ */
+
+void generateRandomStreamlines() {
+
+  streamlines.clear();
+
+  int n =
+    max(
+      3,
+      int(slStreamCount.val)
+      );
+
+
+  for (int i = 0; i < n; i++) {
+
+    PVector seed =
+      new PVector(
+        random(-WORLD, WORLD),
+        random(-WORLD, WORLD),
+        random(-WORLD, WORLD)
+        );
+
+
+    streamlines.add(
+      new Streamline(seed)
+      );
+  }
+}
+
+
+/* ================================================================
+   TOP -> BOTTOM STREAMLINES
+================================================================ */
+
+void generateTopToBottom() {
+
+  flowDirectionMode = 1;
+
+  streamlines.clear();
+
+  int n =
+    max(
+      3,
+      int(slStreamCount.val)
+      );
+
+
+  for (int i = 0; i < n; i++) {
+
+    float u =
+      (i + 0.5f)
+      /
+      float(n);
+
+
+    float x =
+      map(
+        u,
+        0,
+        1,
+        -WORLD,
+        WORLD
+        );
+
+
+    float z =
+      map(
+        (i * 0.618f) % 1.0f,
+        0,
+        1,
+        -WORLD,
+        WORLD
+        );
+
+
+    PVector seed =
+      new PVector(
+        x,
+        -WORLD,
+        z
+        );
+
+
+    streamlines.add(
+      new Streamline(seed)
+      );
+  }
+
+
+  createDirectionalParticles(true);
+}
+
+
+/* ================================================================
+   LEFT -> RIGHT STREAMLINES
+================================================================ */
+
+void generateLeftToRight() {
+
+  flowDirectionMode = 2;
+
+  streamlines.clear();
+
+  int n =
+    max(
+      3,
+      int(slStreamCount.val)
+      );
+
+
+  for (int i = 0; i < n; i++) {
+
+    float u =
+      (i + 0.5f)
+      /
+      float(n);
+
+
+    float y =
+      map(
+        u,
+        0,
+        1,
+        -WORLD,
+        WORLD
+        );
+
+
+    float z =
+      map(
+        (i * 0.618f) % 1.0f,
+        0,
+        1,
+        -WORLD,
+        WORLD
+        );
+
+
+    PVector seed =
+      new PVector(
+        -WORLD,
+        y,
+        z
+        );
+
+
+    streamlines.add(
+      new Streamline(seed)
+      );
+  }
+
+
+  createDirectionalParticles(false);
+}
+
+
+/* ================================================================
+   STREAMLINE CLASS
+================================================================ */
+
+class Streamline {
+
+  ArrayList<PVector> trail;
+
+  PVector pos;
+
+  int maxPoints;
+
+
+  Streamline(PVector start) {
+
+    pos =
+      start.copy();
+
+
+    trail =
+      new ArrayList<PVector>();
+
+
+    maxPoints =
+      max(
+        10,
+        int(slTraceLength.val)
+        );
+
+
+    /* ------------------------------------------------------------
+       Build initial streamline immediately
+    ------------------------------------------------------------ */
+
+    PVector p =
+      pos.copy();
+
+
+    for (int i = 0; i < maxPoints; i++) {
+
+      trail.add(
+        p.copy()
+        );
+
+
+      PVector v =
+        getVelocity(
+          p.x,
+          p.y,
+          p.z,
+          flowTime
+          );
+
+
+      if (v.magSq() < 0.001f) {
+        break;
+      }
+
+
+      v.normalize();
+      v.mult(2.0f);
+
+      p.add(v);
+    }
+  }
+
+
+  void update() {
+
+    trail.clear();
+
+    PVector p =
+      pos.copy();
+
+
+    int count =
+      max(
+        10,
+        int(slTraceLength.val)
+        );
+
+
+    for (int i = 0; i < count; i++) {
+
+      trail.add(
+        p.copy()
+        );
+
+
+      PVector v =
+        getVelocity(
+          p.x,
+          p.y,
+          p.z,
+          flowTime
+          );
+
+
+      if (v.magSq() < 0.001f) {
+        break;
+      }
+
+
+      v.normalize();
+
+      v.mult(2.2f);
+
+      p.add(v);
+
+
+      if (
+        abs(p.x) > WORLD * 1.5f
+        ||
+        abs(p.y) > WORLD * 1.5f
+        ||
+        abs(p.z) > WORLD * 1.5f
+        ) {
+
+        break;
+      }
+    }
+  }
+
+
+  void draw() {
+
+    if (trail.size() < 2) {
+      return;
+    }
+
+
+    stroke(0, 240, 255, 190);
+    strokeWeight(2.0f);
+    noFill();
+
+
+    beginShape();
+
+
+    for (PVector p : trail) {
+
+      vertex(
+        p.x,
+        p.y,
+        p.z
+        );
+    }
+
+
+    endShape();
+
+
+    /* ------------------------------------------------------------
+       Moving marker
+    ------------------------------------------------------------ */
+
+    int index =
+      int(
+        (flowTime * 15.0f)
+        %
+        trail.size()
+        );
+
+
+    PVector q =
+      trail.get(index);
+
+
+    pushMatrix();
+
+    translate(
+      q.x,
+      q.y,
+      q.z
+      );
+
+
+    noStroke();
+
+    fill(
+      0,
+      255,
+      255,
+      230
+      );
+
+
+    sphereDetail(5);
+
+    sphere(2.8f);
+
+    popMatrix();
+  }
+}
+
+
+/* ================================================================
+   STREAKLINE PARTICLE
+================================================================ */
+
+class StreakParticle {
+
+  PVector pos;
+
+  ArrayList<PVector> trail;
+
+  float age;
+  float life;
+
+
+  StreakParticle() {
+
+    pos =
+      streakSource.copy();
+
+
+    trail =
+      new ArrayList<PVector>();
+
+
+    age =
+      random(
+        0,
+        100
+        );
+
+
+    life =
+      100
+      +
+      random(100);
+  }
+
+
+  void update() {
+
+    /* ------------------------------------------------------------
+       Every particle is released from the same fixed point.
+       This produces a streakline.
+    ------------------------------------------------------------ */
+
+    if (age <= 0) {
+
+      pos =
+        streakSource.copy();
+
+      trail.clear();
+    }
+
+
+    PVector v =
+      getVelocity(
+        pos.x,
+        pos.y,
+        pos.z,
+        flowTime
+        );
+
+
+    float speed =
+      v.mag();
+
+
+    if (speed > 0.001f) {
+
+      v.normalize();
+
+      v.mult(2.0f);
+
+      pos.add(v);
+    }
+
+
+    trail.add(
+      pos.copy()
+      );
+
+
+    int maxTrail =
+      max(
+        5,
+        int(slTraceLength.val)
+        );
+
+
+    while (
+      trail.size() > maxTrail
+      ) {
+
+      trail.remove(0);
+    }
+
+
+    age += 1.0f;
+
+
+    if (age > life) {
+
+      pos =
+        streakSource.copy();
+
+      trail.clear();
+
+      age = 0;
+
+      life =
+        100
+        +
+        random(100);
+    }
+  }
+
+
+  void draw() {
+
+    if (trail.size() < 2) {
+      return;
+    }
+
+
+    stroke(
+      255,
+      60,
+      60,
+      180
+      );
+
+    strokeWeight(2.5f);
+
+    noFill();
+
+
+    beginShape();
+
+
+    for (PVector p : trail) {
+
+      vertex(
+        p.x,
+        p.y,
+        p.z
+        );
+    }
+
+
+    endShape();
+
+
+    /* ------------------------------------------------------------
+       Particle
+    ------------------------------------------------------------ */
+
+    pushMatrix();
+
+    translate(
+      pos.x,
+      pos.y,
+      pos.z
+      );
+
+
+    noStroke();
+
+    fill(
+      255,
+      60,
+      60
+      );
+
+
+    sphereDetail(5);
+
+    sphere(3);
+
+    popMatrix();
+  }
+}
+
+
+/* ================================================================
+   CREATE STREAK PARTICLES
+================================================================ */
+
+void createStreakParticles() {
+
+  streakParticles.clear();
+
+
+  int count = 35;
+
+
+  for (int i = 0; i < count; i++) {
+
+    streakParticles.add(
+      new StreakParticle()
+      );
+  }
+}
+
+
+/* ================================================================
+   DIRECTIONAL PARTICLES
+================================================================ */
+
+void createDirectionalParticles(
+  boolean topBottom
+  ) {
+
+  pathParticles.clear();
+
+
+  int n =
+    max(
+      10,
+      int(slStreamCount.val)
+      );
+
+
+  for (int i = 0; i < n; i++) {
+
+    PVector p;
+
+
+    if (topBottom) {
+
+      float x =
+        map(
+          i,
+          0,
+          max(1, n - 1),
+          -WORLD,
+          WORLD
+          );
+
+
+      float z =
+        random(
+          -WORLD,
+          WORLD
+          );
+
+
+      p =
+        new PVector(
+          x,
+          -WORLD,
+          z
+          );
+
+    } else {
+
+      float y =
+        map(
+          i,
+          0,
+          max(1, n - 1),
+          -WORLD,
+          WORLD
+          );
+
+
+      float z =
+        random(
+          -WORLD,
+          WORLD
+          );
+
+
+      p =
+        new PVector(
+          -WORLD,
+          y,
+          z
+          );
+    }
+
+
+    pathParticles.add(
+      new PathParticle(p)
+      );
+  }
+}
+
+
+/* ================================================================
+   INDIVIDUAL PARTICLE PATHLINE
+================================================================ */
+
+class PathParticle {
+
+  PVector pos;
+
+  ArrayList<PVector> trail;
+
+  float age;
+
+
+  PathParticle(PVector start) {
+
+    pos =
+      start.copy();
+
+
+    trail =
+      new ArrayList<PVector>();
+
+
+    age =
+      random(100);
+  }
+
+
+  void update() {
+
+    PVector v =
+      getVelocity(
+        pos.x,
+        pos.y,
+        pos.z,
+        flowTime
+        );
+
+
+    if (v.magSq() > 0.001f) {
+
+      v.normalize();
+
+      v.mult(2.5f);
+
+      pos.add(v);
+    }
+
+
+    trail.add(
+      pos.copy()
+      );
+
+
+    int maxTrail =
+      max(
+        5,
+        int(slTraceLength.val)
+        );
+
+
+    while (
+      trail.size() > maxTrail
+      ) {
+
+      trail.remove(0);
+    }
+
+
+    /* ------------------------------------------------------------
+       Recycle particle outside visualization volume
+    ------------------------------------------------------------ */
+
+    if (
+      abs(pos.x) > WORLD * 1.5f
+      ||
+      abs(pos.y) > WORLD * 1.5f
+      ||
+      abs(pos.z) > WORLD * 1.5f
+      ) {
+
+      reset();
+    }
+
+
+    age += 1.0f;
+  }
+
+
+  void reset() {
+
+    if (flowDirectionMode == 1) {
+
+      pos =
+        new PVector(
+          random(-WORLD, WORLD),
+          -WORLD,
+          random(-WORLD, WORLD)
+          );
+
+    } else if (flowDirectionMode == 2) {
+
+      pos =
+        new PVector(
+          -WORLD,
+          random(-WORLD, WORLD),
+          random(-WORLD, WORLD)
+          );
+
+    } else {
+
+      pos =
+        new PVector(
+          random(-WORLD, WORLD),
+          random(-WORLD, WORLD),
+          random(-WORLD, WORLD)
+          );
+    }
+
+
+    trail.clear();
+  }
+
+
+  void draw() {
+
+    if (trail.size() > 1) {
+
+      stroke(
+        255,
+        230,
+        50,
+        180
+        );
+
+      strokeWeight(2);
+
+      noFill();
+
+
+      beginShape();
+
+
+      for (PVector p : trail) {
+
+        vertex(
+          p.x,
+          p.y,
+          p.z
+          );
+      }
+
+
+      endShape();
+    }
+
+
+    pushMatrix();
+
+    translate(
+      pos.x,
+      pos.y,
+      pos.z
+      );
+
+
+    noStroke();
+
+    fill(
+      255,
+      230,
+      50
+      );
+
+
+    sphereDetail(5);
+
+    sphere(3.5f);
+
+    popMatrix();
+  }
+}
+
+
+/* ================================================================
+   TWO-POINT PARTICLE TRACE
+================================================================ */
+
+void createTwoPointTrace() {
+
+  if (
+    pointA == null
+    ||
+    pointB == null
+    ) {
+
+    return;
+  }
+
+
+  /*
+     Start a particle at A.
+     B is displayed as the target point.
+
+     The particle moves according to the velocity field.
+  */
+
+  PathParticle p =
+    new PathParticle(
+      pointA.copy()
+      );
+
+
+  pathParticles.add(p);
+}
+
+
+/* ================================================================
+   SELECTED POINTS
+================================================================ */
+
+void drawSelectedPoints() {
+
+
+  /* --------------------------------------------------------------
+     POINT A
+  -------------------------------------------------------------- */
+
+  if (pointA != null) {
+
+    pushMatrix();
+
+    translate(
+      pointA.x,
+      pointA.y,
+      pointA.z
+      );
+
+
+    noStroke();
+
+    fill(
+      255,
+      255,
+      0
+      );
+
+
+    sphereDetail(8);
+
+    sphere(7);
+
+    popMatrix();
+  }
+
+
+  /* --------------------------------------------------------------
+     POINT B
+  -------------------------------------------------------------- */
+
+  if (pointB != null) {
+
+    pushMatrix();
+
+    translate(
+      pointB.x,
+      pointB.y,
+      pointB.z
+      );
+
+
+    noStroke();
+
+    fill(
+      255,
+      100,
+      255
+      );
+
+
+    sphereDetail(8);
+
+    sphere(7);
+
+    popMatrix();
+  }
+
+
+  /* --------------------------------------------------------------
+     LINE A -> B
+  -------------------------------------------------------------- */
+
+  if (
+    pointA != null
+    &&
+    pointB != null
+    ) {
+
+    stroke(
+      255,
+      255,
+      0,
+      130
+      );
+
+
+    strokeWeight(2);
+
+
+    line(
+      pointA.x,
+      pointA.y,
+      pointA.z,
+      pointB.x,
+      pointB.y,
+      pointB.z
+      );
+  }
+}
+
+
+/* ================================================================
+   FLUX PRISM
+================================================================ */
+
+class FluxPrism {
+
+  PVector pos;
+
+  float w;
+  float h;
+  float d;
+
+  float netFlux;
+
+
+  FluxPrism(
+    PVector pos,
+    float w,
+    float h,
+    float d
+    ) {
+
+    this.pos =
+      pos.copy();
+
+    this.w = w;
+    this.h = h;
+    this.d = d;
+  }
+
+
+  void update() {
+
+    netFlux =
+      getDivergence(
+        pos.x,
+        pos.y,
+        pos.z,
+        flowTime
+        );
+  }
+
+
+  void draw() {
+
+    pushMatrix();
+
+
+    translate(
+      pos.x,
+      pos.y,
+      pos.z
+      );
+
+
+    noFill();
+
+
+    if (netFlux > 0) {
+
+      stroke(
+        50,
+        255,
+        100,
+        150
+        );
+
+    } else {
+
+      stroke(
+        100,
+        200,
+        255,
+        150
+        );
+    }
+
+
+    strokeWeight(2);
+
+
+    box(
+      w,
+      h,
+      d
+      );
+
+
+    /* ------------------------------------------------------------
+       Six faces
+    ------------------------------------------------------------ */
+
+    drawFace(
+      new PVector(w / 2, 0, 0),
+      new PVector(1, 0, 0)
+      );
+
+
+    drawFace(
+      new PVector(-w / 2, 0, 0),
+      new PVector(-1, 0, 0)
+      );
+
+
+    drawFace(
+      new PVector(0, h / 2, 0),
+      new PVector(0, 1, 0)
+      );
+
+
+    drawFace(
+      new PVector(0, -h / 2, 0),
+      new PVector(0, -1, 0)
+      );
+
+
+    drawFace(
+      new PVector(0, 0, d / 2),
+      new PVector(0, 0, 1)
+      );
+
+
+    drawFace(
+      new PVector(0, 0, -d / 2),
+      new PVector(0, 0, -1)
+      );
+
+
+    popMatrix();
+  }
+
+
+  void drawFace(
+    PVector off,
+    PVector normal
+    ) {
+
+    PVector sp =
+      PVector.add(
+        pos,
+        off
+        );
+
+
+    PVector vel =
+      getVelocity(
+        sp.x,
+        sp.y,
+        sp.z,
+        flowTime
+        );
+
+
+    pushMatrix();
+
+
+    translate(
+      off.x,
+      off.y,
+      off.z
+      );
+
+
+    if (
+      vel.dot(normal) > 0
+      ) {
+
+      stroke(
+        50,
+        255,
+        100
+        );
+
+      fill(
+        50,
+        255,
+        100
+        );
+
+    } else {
+
+      stroke(
+        100,
+        200,
+        255
+        );
+
+      fill(
+        100,
+        200,
+        255
+        );
+    }
+
+
+    draw3DArrow(
+      new PVector(0, 0, 0),
+      PVector.mult(
+        vel,
+        0.3f
+        )
+      );
+
+
+    popMatrix();
+  }
+}
+
+
+/* ================================================================
+   CURL FAN
+================================================================ */
+
+class CurlFan {
+
+  PVector pos;
+
+  PVector curlVec =
+    new PVector();
+
+
+  float spinAngle = 0;
+
+
+  CurlFan(PVector pos) {
+
+    this.pos =
+      pos.copy();
+  }
+
+
+  void update() {
+
+    curlVec =
+      getCurl(
+        pos.x,
+        pos.y,
+        pos.z,
+        flowTime
+        );
+
+
+    spinAngle +=
+      curlVec.mag()
+      *
+      slSpeed.val
+      *
+      3.0f;
+  }
+
+
+  void draw() {
+
+    pushMatrix();
+
+
+    translate(
+      pos.x,
+      pos.y,
+      pos.z
+      );
+
+
+    if (
+      curlVec.mag() > 0.01f
+      ) {
+
+      alignRotToVec(
+        curlVec
+        );
+    }
+
+
+    rotateZ(spinAngle);
+
+
+    stroke(
+      255,
+      150,
+      40
+      );
+
+    strokeWeight(3);
+
+
+    line(
+      0,
+      0,
+      -8,
+      0,
+      0,
+      8
+      );
+
+
+    noStroke();
+
+
+    fill(
+      255,
+      150,
+      40,
+      220
+      );
+
+
+    pushMatrix();
+
+    box(
+      24,
+      4,
+      1
+      );
+
+    popMatrix();
+
+
+    pushMatrix();
+
+    rotateZ(HALF_PI);
+
+    box(
+      24,
+      4,
+      1
+      );
+
+    popMatrix();
+
+
+    popMatrix();
+  }
+}
+
+
+/* ================================================================
+   3D PLANES
+================================================================ */
+
+void drawPlanes() {
+
+  strokeWeight(1);
+
+  float s =
+    WORLD;
+
+
+  /* --------------------------------------------------------------
+     XY PLANE
+  -------------------------------------------------------------- */
+
+  if (activePlaneMode == 0) {
+
+    stroke(
+      255,
+      80,
+      80,
+      150
+      );
+
+  } else {
+
+    stroke(
+      255,
+      255,
+      255,
+      25
+      );
+  }
+
+
+  for (
+    float i = -s;
+    i <= s;
+    i += 20
+    ) {
+
+    line(
+      i,
+      -s,
+      0,
+      i,
+      s,
+      0
+      );
+
+
+    line(
+      -s,
+      i,
+      0,
+      s,
+      i,
+      0
+      );
+  }
+
+
+  /* --------------------------------------------------------------
+     YZ PLANE
+  -------------------------------------------------------------- */
+
+  if (activePlaneMode == 1) {
+
+    stroke(
+      80,
+      80,
+      255,
+      150
+      );
+
+  } else {
+
+    stroke(
+      255,
+      255,
+      255,
+      25
+      );
+  }
+
+
+  for (
+    float i = -s;
+    i <= s;
+    i += 20
+    ) {
+
+    line(
+      0,
+      i,
+      -s,
+      0,
+      i,
+      s
+      );
+
+
+    line(
+      0,
+      -s,
+      i,
+      0,
+      s,
+      i
+      );
+  }
+
+
+  /* --------------------------------------------------------------
+     ZX PLANE
+  -------------------------------------------------------------- */
+
+  if (activePlaneMode == 2) {
+
+    stroke(
+      80,
+      255,
+      80,
+      150
+      );
+
+  } else {
+
+    stroke(
+      255,
+      255,
+      255,
+      25
+      );
+  }
+
+
+  for (
+    float i = -s;
+    i <= s;
+    i += 20
+    ) {
+
+    line(
+      i,
+      0,
+      -s,
+      i,
+      0,
+      s
+      );
+
+
+    line(
+      -s,
+      0,
+      i,
+      s,
+      0,
+      i
+      );
+  }
+}
+
+
+/* ================================================================
+   VECTOR FIELD ARROWS
+================================================================ */
+
+void drawVectorField() {
+
+  float step = 40.0f;
+
+  float bounds =
+    WORLD;
+
+
+  strokeWeight(1.2f);
+
+
+  for (
+    float x = -bounds;
+    x <= bounds;
+    x += step
+    ) {
+
+    for (
+      float y = -bounds;
+      y <= bounds;
+      y += step
+      ) {
+
+      for (
+        float z = -bounds;
+        z <= bounds;
+        z += step
+        ) {
+
+
+        PVector vel =
+          getVelocity(
+            x,
+            y,
+            z,
+            flowTime
+            );
+
+
+        if (vel.mag() < 2.0f) {
+          continue;
+        }
+
+
+        vel.mult(0.25f);
+
+
+        stroke(
+          255,
+          255,
+          255,
+          70
+          );
+
+
+        fill(
+          255,
+          255,
+          255,
+          120
+          );
+
+
+        draw3DArrow(
+          new PVector(
+            x,
+            y,
+            z
+            ),
+          vel
+          );
+      }
+    }
+  }
+}
+
+
+/* ================================================================
+   3D ARROW
+================================================================ */
+
+void draw3DArrow(
+  PVector pos,
+  PVector vel
+  ) {
+
+  pushMatrix();
+
+
+  translate(
+    pos.x,
+    pos.y,
+    pos.z
+    );
+
+
+  float mag =
+    vel.mag();
+
+
+  if (mag > 0.001f) {
+
+    alignRotToVec(vel);
+
+
+    line(
+      0,
+      0,
+      0,
+      0,
+      0,
+      mag
+      );
+
+
+    translate(
+      0,
+      0,
+      mag
+      );
+
+
+    float hSize =
+      min(
+        mag * 0.3f,
+        4.0f
+        );
+
+
+    beginShape(TRIANGLES);
+
+
+    /* ------------------------------------------------------------
+       Triangle 1
+    ------------------------------------------------------------ */
+
+    vertex(
+      -hSize / 2,
+      -hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      hSize / 2,
+      -hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      0,
+      0,
+      0
+      );
+
+
+    /* ------------------------------------------------------------
+       Triangle 2
+    ------------------------------------------------------------ */
+
+    vertex(
+      hSize / 2,
+      -hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      hSize / 2,
+      hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      0,
+      0,
+      0
+      );
+
+
+    /* ------------------------------------------------------------
+       Triangle 3
+    ------------------------------------------------------------ */
+
+    vertex(
+      hSize / 2,
+      hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      -hSize / 2,
+      hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      0,
+      0,
+      0
+      );
+
+
+    /* ------------------------------------------------------------
+       Triangle 4
+    ------------------------------------------------------------ */
+
+    vertex(
+      -hSize / 2,
+      hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      -hSize / 2,
+      -hSize / 2,
+      -hSize
+      );
+
+    vertex(
+      0,
+      0,
+      0
+      );
+
+
+    endShape();
+  }
+
+
+  popMatrix();
+}
+
+
+/* ================================================================
+   ROTATE VECTOR TO Z AXIS
+================================================================ */
+
+void alignRotToVec(
+  PVector dir
+  ) {
+
+  PVector v =
+    dir.copy().normalize();
+
+
+  PVector zAxis =
+    new PVector(
+      0,
+      0,
+      1
+      );
+
+
+  PVector rotAxis =
+    zAxis.cross(v);
+
+
+  float dotValue =
+    constrain(
+      zAxis.dot(v),
+      -1,
+      1
+      );
+
+
+  float angle =
+    acos(dotValue);
+
+
+  if (rotAxis.magSq() > 0.001f) {
+
+    rotate(
+      angle,
+      rotAxis.x,
+      rotAxis.y,
+      rotAxis.z
+      );
+
+  } else if (
+    zAxis.dot(v) < 0
+    ) {
+
+    rotate(
+      PI,
+      1,
+      0,
+      0
+      );
+  }
+}
+
+
+/* ================================================================
+   SLIDER CLASS
+================================================================ */
+
+class Slider {
+
+  String label;
+
+  float x;
+  float y;
+  float w;
+
+  float min;
+  float max;
+
+  float val;
+
+
+  Slider(
+    String label,
+    float x,
+    float y,
+    float w,
+    float min,
+    float max,
+    float val
+    ) {
+
+    this.label = label;
+
+    this.x = x;
+    this.y = y;
+    this.w = w;
+
+    this.min = min;
+    this.max = max;
+
+    this.val = val;
+  }
+
+
+  void draw() {
+
+    fill(255);
+
+
+    textAlign(
+      LEFT,
+      TOP
+      );
+
+
+    textSize(14);
+
+
+    text(
+      label
+      +
+      ": "
+      +
+      nf(
+        val,
+        0,
+        2
+        ),
+      x,
+      y - 18
+      );
+
+
+    stroke(100);
+
+    strokeWeight(4);
+
+
+    line(
+      x,
+      y,
+      x + w,
+      y
+      );
+
+
+    float px =
+      map(
+        val,
+        min,
+        max,
+        x,
+        x + w
+        );
+
+
+    noStroke();
+
+
+    fill(
+      50,
+      200,
+      255
+      );
+
+
+    ellipse(
+      px,
+      y,
+      16,
+      16
+      );
+  }
+
+
+  boolean check(
+    float mx,
+    float my
+    ) {
+
+    if (
+      mx >= x - 12
+      &&
+      mx <= x + w + 12
+      &&
+      my >= y - 15
+      &&
+      my <= y + 15
+      ) {
+
+      val =
+        map(
+          constrain(
+            mx,
+            x,
+            x + w
+            ),
+          x,
+          x + w,
+          min,
+          max
+          );
+
+
+      return true;
+    }
+
+
+    return false;
+  }
+}
+
+
+/* ================================================================
+   BUTTON
+================================================================ */
+
+void drawButton(
+  float x,
+  float y,
+  float w,
+  float h,
+  String txt
+  ) {
+
+  fill(
+    30,
+    45,
+    65,
+    245
+    );
+
+
+  stroke(
+    100,
+    140,
+    170
+    );
+
+
+  strokeWeight(1.5f);
+
+
+  rect(
+    x,
+    y,
+    w,
+    h,
+    8
+    );
+
+
+  fill(255);
+
+  noStroke();
+
+
+  textAlign(
+    CENTER,
+    CENTER
+    );
+
+
+  textSize(15);
+
+
+  text(
+    txt,
+    x + w / 2,
+    y + h / 2
+    );
+}
+
+
+/* ================================================================
+   HUD
+================================================================ */
+
+void drawHUD() {
+
+  hint(DISABLE_DEPTH_TEST);
+
+  camera();
+
+  noLights();
+
+
+  /* --------------------------------------------------------------
+     SIDEBAR
+  -------------------------------------------------------------- */
+
+  noStroke();
+
+
+  fill(
+    8,
+    14,
+    24,
+    235
+    );
+
+
+  rect(
+    0,
+    0,
+    240,
+    355
+    );
+
+
+  for (Slider s : sliders) {
+    s.draw();
+  }
+
+
+  /* --------------------------------------------------------------
+     MODE INFORMATION
+  -------------------------------------------------------------- */
+
+  fill(255);
+
+
+  textAlign(
+    LEFT,
+    TOP
+    );
+
+
+  textSize(13);
+
+
+  String planeName;
+
+
+  if (activePlaneMode == 0) {
+
+    planeName = "XY";
+
+  } else if (activePlaneMode == 1) {
+
+    planeName = "YZ";
+
+  } else {
+
+    planeName = "ZX";
+  }
+
+
+  String flowName;
+
+
+  if (flowDirectionMode == 1) {
+
+    flowName =
+      "TOP -> BOTTOM";
+
+  } else if (flowDirectionMode == 2) {
+
+    flowName =
+      "LEFT -> RIGHT";
+
+  } else {
+
+    flowName =
+      "RANDOM / FIELD";
+  }
+
+
+  text(
+    "Plane: " + planeName,
+    20,
+    330
+    );
+
+
+  text(
+    "Flow: " + flowName,
+    20,
+    347
+    );
+
+
+  /* --------------------------------------------------------------
+     BOTTOM BUTTONS
+  -------------------------------------------------------------- */
+
+  float buttonY =
+    height - 65;
+
+
+  float gap = 8;
+
+  float bw = 145;
+
+
+  drawButton(
+    10,
+    buttonY,
+    bw,
+    48,
+    "TOP -> BOTTOM"
+    );
+
+
+  drawButton(
+    10 + bw + gap,
+    buttonY,
+    bw,
+    48,
+    "LEFT -> RIGHT"
+    );
+
+
+  drawButton(
+    10 + (bw + gap) * 2,
+    buttonY,
+    bw,
+    48,
+    "RANDOM"
+    );
+
+
+  drawButton(
+    10 + (bw + gap) * 3,
+    buttonY,
+    120,
+    48,
+    "PLANE: " + planeName
+    );
+
+
+  drawButton(
+    width - 125,
+    buttonY,
+    115,
+    48,
+    "CLEAR"
+    );
+
+
+  /* --------------------------------------------------------------
+     TWO POINT INFORMATION
+  -------------------------------------------------------------- */
+
+  fill(
+    255,
+    255,
+    255,
+    210
+    );
+
+
+  textAlign(
+    CENTER,
+    TOP
+    );
+
+
+  textSize(13);
+
+
+  String traceText;
+
+
+  if (pointA == null) {
+
+    traceText =
+      "Tap point A";
+
+  } else if (pointB == null) {
+
+    traceText =
+      "Tap point B";
+
+  } else {
+
+    traceText =
+      "A -> B particle trace active";
+  }
+
+
+  text(
+    traceText,
+    width / 2,
+    height - 92
+    );
+
+
+  hint(ENABLE_DEPTH_TEST);
+}
+
+
+/* ================================================================
+   MOUSE PRESSED
+================================================================ */
+
+void mousePressed() {
+
+  lastMouseX =
+    mouseX;
+
+  lastMouseY =
+    mouseY;
+
+
+  tapStartPos =
+    new PVector(
+      mouseX,
+      mouseY
+      );
+
+
+  tapStartTime =
+    millis();
+
+
+  isDraggingUI =
+    false;
+
+
+  for (Slider s : sliders) {
+
+    if (
+      s.check(
+        mouseX,
+        mouseY
+        )
+      ) {
+
+      isDraggingUI = true;
+    }
+  }
+}
+
+
+/* ================================================================
+   MOUSE DRAGGED
+================================================================ */
+
+void mouseDragged() {
+
+  if (isDraggingUI) {
+
+    for (Slider s : sliders) {
+
+      s.check(
+        mouseX,
+        mouseY
+        );
+    }
+
+  } else {
+
+    camRotY +=
+      (
+        mouseX
+        -
+        lastMouseX
+        )
+      *
+      0.01f;
+
+
+    camRotX +=
+      (
+        mouseY
+        -
+        lastMouseY
+        )
+      *
+      0.01f;
+  }
+
+
+  lastMouseX =
+    mouseX;
+
+
+  lastMouseY =
+    mouseY;
+}
+
+
+/* ================================================================
+   MOUSE RELEASED
+================================================================ */
+
+void mouseReleased() {
+
+  if (isDraggingUI) {
+    return;
+  }
+
+
+  long duration =
+    millis() - tapStartTime;
+
+
+  boolean shortTap =
+    duration < 350;
+
+
+  boolean smallMovement =
+    tapStartPos.dist(
+      new PVector(
+        mouseX,
+        mouseY
+        )
+      )
+    <
+    20;
+
+
+  if (
+    !shortTap
+    ||
+    !smallMovement
+    ) {
+
+    return;
+  }
+
+
+  /* --------------------------------------------------------------
+     TOP -> BOTTOM
+  -------------------------------------------------------------- */
+
+  if (
+    mouseX >= 10
+    &&
+    mouseX <= 155
+    &&
+    mouseY >= height - 65
+    &&
+    mouseY <= height - 17
+    ) {
+
+    generateTopToBottom();
+
+    return;
+  }
+
+
+  /* --------------------------------------------------------------
+     LEFT -> RIGHT
+  -------------------------------------------------------------- */
+
+  if (
+    mouseX >= 163
+    &&
+    mouseX <= 308
+    &&
+    mouseY >= height - 65
+    &&
+    mouseY <= height - 17
+    ) {
+
+    generateLeftToRight();
+
+    return;
+  }
+
+
+  /* --------------------------------------------------------------
+     RANDOM
+  -------------------------------------------------------------- */
+
+  if (
+    mouseX >= 316
+    &&
+    mouseX <= 461
+    &&
+    mouseY >= height - 65
+    &&
+    mouseY <= height - 17
+    ) {
+
+    flowDirectionMode = 0;
+
+    generateRandomStreamlines();
+
+    createDirectionalParticles(false);
+
+    return;
+  }
+
+
+  /* --------------------------------------------------------------
+     PLANE BUTTON
+  -------------------------------------------------------------- */
+
+  if (
+    mouseX >= 469
+    &&
+    mouseX <= 589
+    &&
+    mouseY >= height - 65
+    &&
+    mouseY <= height - 17
+    ) {
+
+    activePlaneMode =
+      (
+        activePlaneMode + 1
+        )
+      %
+      3;
+
+
+    return;
+  }
+
+
+  /* --------------------------------------------------------------
+     CLEAR
+  -------------------------------------------------------------- */
+
+  if (
+    mouseX >= width - 125
+    &&
+    mouseX <= width - 10
+    &&
+    mouseY >= height - 65
+    &&
+    mouseY <= height - 17
+    ) {
+
+    streamlines.clear();
+
+    streakParticles.clear();
+
+    pathParticles.clear();
+
+    fans.clear();
+
+
+    pointA = null;
+
+    pointB = null;
+
+    waitingForSecondPoint = false;
+
+
+    return;
+  }
+
+
+  /* --------------------------------------------------------------
+     3D PLANE TOUCH
+  -------------------------------------------------------------- */
+
+  PVector hit =
+    raycastPlane(
+      mouseX,
+      mouseY,
+      activePlaneMode
+      );
+
+
+  if (
+    hit != null
+    &&
+    hit.mag() < WORLD * 1.5f
+    ) {
+
+
+    /* ------------------------------------------------------------
+       FIRST TOUCH = A
+    ------------------------------------------------------------ */
+
+    if (pointA == null) {
+
+      pointA =
+        hit.copy();
+
+
+      waitingForSecondPoint =
+        true;
+
+
+      streakSource =
+        hit.copy();
+
+
+      createStreakParticles();
+
+
+      fans.add(
+        new CurlFan(hit)
+        );
+
+
+    /* ------------------------------------------------------------
+       SECOND TOUCH = B
+    ------------------------------------------------------------ */
+
+    } else if (pointB == null) {
+
+      pointB =
+        hit.copy();
+
+
+      waitingForSecondPoint =
+        false;
+
+
+      createTwoPointTrace();
+
+
+    /* ------------------------------------------------------------
+       THIRD TOUCH = NEW A
+    ------------------------------------------------------------ */
+
+    } else {
+
+      pointA =
+        hit.copy();
+
+
+      pointB = null;
+
+
+      waitingForSecondPoint =
+        true;
+
+
+      streakSource =
+        hit.copy();
+
+
+      createStreakParticles();
+
+
+      fans.add(
+        new CurlFan(hit)
+        );
+    }
+  }
+}
+
+
+/* ================================================================
+   RAYCAST SCREEN -> 3D
+================================================================ */
+
+PVector raycastPlane(
+  float mx,
+  float my,
+  int planeMode
+  ) {
+
+
+  /*
+     Perspective approximation matching the
+     Processing P3D camera arrangement.
+  */
+
+  float d =
+    (
+      height / 2.0f
+      )
+    /
+    tan(
+      PI / 6.0f
+      );
+
+
+  /*
+     Camera-space ray.
+
+     Camera is positioned along -Z
+     by camZoom in the world transform.
+  */
+
+  PVector orig =
+    new PVector(
+      0,
+      0,
+      camZoom + d
+      );
+
+
+  PVector dir =
+    new PVector(
+      mx - width / 2.0f,
+      my - height / 2.0f,
+      -d
+      );
+
+
+  /* --------------------------------------------------------------
+     Undo camera rotations
+  -------------------------------------------------------------- */
+
+  orig =
+    rotX(
+      orig,
+      -camRotX
+      );
+
+
+  orig =
+    rotY(
+      orig,
+      -camRotY
+      );
+
+
+  dir =
+    rotX(
+      dir,
+      -camRotX
+      );
+
+
+  dir =
+    rotY(
+      dir,
+      -camRotY
+      );
+
+
+  float t = -1;
+
+
+  /* --------------------------------------------------------------
+     XY PLANE
+  -------------------------------------------------------------- */
+
+  if (
+    planeMode == 0
+    &&
+    abs(dir.z) > 0.001f
+    ) {
+
+    t =
+      -orig.z
+      /
+      dir.z;
+  }
+
+
+  /* --------------------------------------------------------------
+     YZ PLANE
+  -------------------------------------------------------------- */
+
+  else if (
+    planeMode == 1
+    &&
+    abs(dir.x) > 0.001f
+    ) {
+
+    t =
+      -orig.x
+      /
+      dir.x;
+  }
+
+
+  /* --------------------------------------------------------------
+     ZX PLANE
+  -------------------------------------------------------------- */
+
+  else if (
+    planeMode == 2
+    &&
+    abs(dir.y) > 0.001f
+    ) {
+
+    t =
+      -orig.y
+      /
+      dir.y;
+  }
+
+
+  if (t > 0) {
+
+    return new PVector(
+      orig.x + dir.x * t,
+      orig.y + dir.y * t,
+      orig.z + dir.z * t
+      );
+  }
+
+
+  return null;
+}
+
+
+/* ================================================================
+   ROTATION HELPERS
+================================================================ */
+
+PVector rotX(
+  PVector v,
+  float a
+  ) {
+
+  return new PVector(
+    v.x,
+    v.y * cos(a) - v.z * sin(a),
+    v.y * sin(a) + v.z * cos(a)
+    );
+}
+
+
+PVector rotY(
+  PVector v,
+  float a
+  ) {
+
+  return new PVector(
+    v.x * cos(a) + v.z * sin(a),
+    v.y,
+    -v.x * sin(a) + v.z * cos(a)
+    );
+}
+
+
+/* ================================================================
+   MOUSE WHEEL / ZOOM
+================================================================ */
+
+void mouseWheel(
+  processing.event.MouseEvent event
+  ) {
+
+  float amount =
+    event.getCount();
+
+
+  camZoom +=
+    amount * 15.0f;
+
+
+  camZoom =
+    constrain(
+      camZoom,
+      100,
+      500
+      );
+}
+
+
+/* ================================================================
+   TOUCH SUPPORT FOR APDE
+================================================================ */
+
+void touchStarted() {
+
+  /*
+     APDE normally maps touch input to
+     Processing mouse events.
+
+     This keeps the touch state available.
+  */
+
+  touching = true;
+}
+
+
+void touchEnded() {
+
+  touching = false;
+}
+
+
+/* ================================================================
+   END
+================================================================ */
