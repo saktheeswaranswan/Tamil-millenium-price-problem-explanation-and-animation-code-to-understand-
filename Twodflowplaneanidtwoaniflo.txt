@@ -1,0 +1,1260 @@
+Curl vector animated code
+
+/* =================================================================
+FLUID FLOW LAB
+APDE / PROCESSING FOR ANDROID
+P3D 3D DRAGGABLE FLOW PLANE
+================================================================= */
+
+/* ================================================================
+DOMAIN
+================================================================ */
+
+final int NX = 92;
+final int NY = 58;
+
+final float WORLD_W = 14.0f;
+final float WORLD_H = 9.0f;
+
+final float XMIN = -WORLD_W * 0.5f;
+final float XMAX = WORLD_W * 0.5f;
+
+final float YMIN = -WORLD_H * 0.5f;
+final float YMAX = WORLD_H * 0.5f;
+
+final float BASE_SPEED = 2.2f;
+
+final float PLANE_Z = 0.0f;
+
+/* ================================================================
+OBSTACLE TYPES
+================================================================ */
+
+final int CYLINDER = 0;
+final int AIRFOIL = 1;
+final int RECTANGLE = 2;
+final int TRIANGLE = 3;
+
+int obstacleType = CYLINDER;
+
+/* ================================================================
+FIELD ARRAYS
+================================================================ */
+
+float[][] psiX;
+float[][] psiY;
+
+float[][] velUx;
+float[][] velVx;
+
+float[][] velUy;
+float[][] velVy;
+
+boolean[][] blocked;
+
+/* ================================================================
+SIMULATION
+================================================================ */
+
+float flowTime = 0.0f;
+
+boolean steadyFlow = true;
+boolean paused = false;
+boolean movePatches = false;
+
+float simulationSpeed = 1.0f;
+
+/* ================================================================
+PARTICLES & FANS
+================================================================ */
+
+ArrayList<Tracer> streakParticles;
+ArrayList<Tracer> pathParticles;
+ArrayList<CurlFan> curlFans;
+
+/* ================================================================
+STREAMLINES
+================================================================ */
+
+final int STREAMLINE_COUNT = 17;
+final int STREAM_DOTS_PER_LINE = 3;
+
+float streamlineMarkerSpeed = 1.4f;
+
+/* ================================================================
+STREAK SOURCE & FLUX SAMPLES
+================================================================ */
+
+float streakSourceX = -5.55f;
+float streakSourceY = 0.0f;
+float streakReleaseRate = 12.0f;
+float streakSpawnAccumulator = 0.0f;
+
+float fluxSampleCount = 32.0f; // Controls the number of vectors on patch boundaries
+
+/* ================================================================
+CAMERA & TOUCH
+================================================================ */
+
+float rotX = radians(64);
+float rotZ = radians(-5);
+
+float lastTouchX;
+float lastTouchY;
+float tapStartX;
+float tapStartY;
+long tapStartTime;
+
+boolean draggingView = false;
+float viewScale;
+
+/* ================================================================
+COLORS
+================================================================ */
+
+int STREAM_COLOR;
+int STREAK_COLOR;
+int PATH_COLOR;
+
+int STREAM_DOT_RED;
+int STREAM_DOT_BLUE;
+int STREAM_DOT_GREEN;
+
+int VECTOR_COLOR;
+int PATCH_BLUE;
+int PATCH_OUTLINE;
+
+int VELOCITY_ARROW_YELLOW;
+
+/* ================================================================
+USER INTERFACE
+================================================================ */
+
+String shapeName = "CYLINDER";
+int pressedButton = -1;
+
+float globalPatchScale = 1.0f;
+boolean adjustingReleaseSlider = false;
+boolean adjustingPatchSlider = false;
+boolean adjustingSampleSlider = false;
+
+/* ================================================================
+FLUX PATCH TYPES & COLLECTION
+================================================================ */
+
+final int PATCH_SQUARE = 0;
+final int PATCH_CIRCLE = 1;
+final int PATCH_TRIANGLE = 2;
+final int PATCH_RECTANGLE = 3;
+final int PATCH_SMILEY = 4;
+
+ArrayList<FluxPatch> fluxPatches;
+
+float divergenceVisualGain = 35.0f;
+
+/* ================================================================
+SETTINGS
+================================================================ */
+
+void settings() {
+  fullScreen(P3D);
+}
+
+/* ================================================================
+SETUP
+================================================================ */
+
+void setup() {
+  orientation(LANDSCAPE);
+  frameRate(60);
+  smooth(4);
+
+  viewScale = min(width / WORLD_W, height / WORLD_H) * 0.72f;
+
+  /* --------------------------------------------------------------
+  COLOR DEFINITIONS
+  -------------------------------------------------------------- */
+  STREAM_COLOR = color(35, 235, 255, 220);
+  STREAK_COLOR = color(255, 40, 55, 225);
+  PATH_COLOR = color(255, 220, 40, 220);
+  STREAM_DOT_RED = color(255, 60, 65, 255);
+  STREAM_DOT_BLUE = color(40, 150, 255, 255);
+  STREAM_DOT_GREEN = color(70, 255, 110, 255);
+  VECTOR_COLOR = color(245, 245, 255, 180);
+  PATCH_BLUE = color(30, 170, 255, 55);
+  PATCH_OUTLINE = color(30, 210, 255, 210);
+  VELOCITY_ARROW_YELLOW = color(255, 225, 40, 245);
+
+  /* --------------------------------------------------------------
+  ARRAYS & LISTS
+  -------------------------------------------------------------- */
+  allocateFieldArrays();
+
+  streakParticles = new ArrayList<Tracer>();
+  pathParticles = new ArrayList<Tracer>();
+  fluxPatches = new ArrayList<FluxPatch>();
+  curlFans = new ArrayList<CurlFan>();
+
+  /* --------------------------------------------------------------
+  BUILD SIMULATION
+  -------------------------------------------------------------- */
+  buildObstacle();
+  initializePathParticles();
+  resetStreakline();
+  initializeFluxPatches();
+}
+
+/* ================================================================
+ARRAY ALLOCATION
+================================================================ */
+
+void allocateFieldArrays() {
+  psiX = new float[NX][NY];
+  psiY = new float[NX][NY];
+  velUx = new float[NX][NY];
+  velVx = new float[NX][NY];
+  velUy = new float[NX][NY];
+  velVy = new float[NX][NY];
+  blocked = new boolean[NX][NY];
+}
+
+/* ================================================================
+MAIN DRAW
+================================================================ */
+
+void draw() {
+  background(7, 17, 27);
+
+  float dtForPatches = 0;
+
+  if (!paused) {
+    float dt = 0.025f * simulationSpeed; 
+    flowTime += dt; 
+    updatePathParticles(dt); 
+    updateStreakParticles(dt); 
+    updateCurlFans(dt);
+    dtForPatches = dt; 
+  }
+
+  updateFluxPatches(dtForPatches);
+
+  /* ============================================================
+  3D WORLD
+  ============================================================ */
+  pushMatrix();
+  translate(width * 0.5f, height * 0.50f, 0);
+  rotateX(rotX);
+  rotateZ(rotZ);
+  scale(viewScale);
+
+  drawFlowPlane();
+  drawGrid();
+
+  drawFluxPatches();
+  drawStreamlines();
+  drawStreaklines();
+  drawPathlines();
+  
+  drawVelocityVectors();
+  drawYellowVelocityPointers();
+  drawBoundaryFluxVectors(); 
+  
+  drawCurlFans();
+  drawObstacle();
+  drawStreakSource();
+
+  popMatrix();
+
+  /* ============================================================
+  SCREEN UI
+  ============================================================ */
+  drawHUD();
+  drawLegendAndControls();
+  drawPatchInformation();
+  drawCurlFanLabels();
+}
+
+/* ================================================================
+BUILD OBSTACLE
+================================================================ */
+
+void buildObstacle() {
+  shapeName = getShapeName(obstacleType);
+  resetBlockedArray();
+
+  for (int i = 0; i < NX; i++) {
+    float x = gridX(i); 
+    for (int j = 0; j < NY; j++) { 
+      float y = gridY(j); 
+      blocked[i][j] = insideObstacle(x, y); 
+    } 
+  }
+
+  solvePotentialField(0);
+  solvePotentialField(1);
+  computeVelocityBasis();
+}
+
+void resetBlockedArray() {
+  for (int i = 0; i < NX; i++) {
+    for (int j = 0; j < NY; j++) { 
+      blocked[i][j] = false; 
+    } 
+  }
+}
+
+/* ================================================================
+LAPLACE / POTENTIAL FIELD
+================================================================ */
+
+void solvePotentialField(int component) {
+  float[][] current = new float[NX][NY];
+  float[][] next = new float[NX][NY];
+
+  for (int i = 0; i < NX; i++) {
+    float x = gridX(i); 
+    for (int j = 0; j < NY; j++) { 
+      float y = gridY(j); 
+      float boundaryValue = (component == 0) ? y : -x; 
+      current[i][j] = blocked[i][j] ? 0 : boundaryValue; 
+      next[i][j] = current[i][j]; 
+    } 
+  }
+
+  final int MAX_ITER = 700;
+
+  for (int iteration = 0; iteration < MAX_ITER; iteration++) {
+    float maxError = 0; 
+    for (int i = 1; i < NX - 1; i++) { 
+      for (int j = 1; j < NY - 1; j++) { 
+        if (blocked[i][j]) { next[i][j] = 0; continue; } 
+        float left = blocked[i - 1][j] ? 0 : current[i - 1][j]; 
+        float right = blocked[i + 1][j] ? 0 : current[i + 1][j]; 
+        float bottom = blocked[i][j - 1] ? 0 : current[i][j - 1]; 
+        float top = blocked[i][j + 1] ? 0 : current[i][j + 1]; 
+        float value = (left + right + bottom + top) * 0.25f; 
+        next[i][j] = value; 
+        float error = abs(value - current[i][j]); 
+        if (error > maxError) { maxError = error; } 
+      } 
+    } 
+    
+    for (int j = 0; j < NY; j++) { 
+      float y = gridY(j); 
+      if (component == 0) { next[0][j] = y; next[NX - 1][j] = y; } 
+      else { next[0][j] = -gridX(0); next[NX - 1][j] = -gridX(NX - 1); } 
+    } 
+    for (int i = 0; i < NX; i++) { 
+      float x = gridX(i); 
+      if (component == 0) { next[i][0] = gridY(0); next[i][NY - 1] = gridY(NY - 1); } 
+      else { next[i][0] = -x; next[i][NY - 1] = -x; } 
+    } 
+    
+    float[][] temp = current; current = next; next = temp; 
+    if (maxError < 0.00001f) { break; } 
+  }
+
+  if (component == 0) {
+    for (int i = 0; i < NX; i++) for (int j = 0; j < NY; j++) psiX[i][j] = current[i][j]; 
+  } else {
+    for (int i = 0; i < NX; i++) for (int j = 0; j < NY; j++) psiY[i][j] = current[i][j]; 
+  }
+}
+
+/* ================================================================
+VELOCITY BASIS
+================================================================ */
+
+void computeVelocityBasis() {
+  float dx = WORLD_W / (NX - 1.0f);
+  float dy = WORLD_H / (NY - 1.0f);
+
+  for (int i = 0; i < NX; i++) {
+    for (int j = 0; j < NY; j++) { 
+      if (blocked[i][j]) { 
+        velUx[i][j] = 0; velVx[i][j] = 0; velUy[i][j] = 0; velVy[i][j] = 0; 
+        continue; 
+      } 
+      int im = max(0, i - 1); int ip = min(NX - 1, i + 1); 
+      int jm = max(0, j - 1); int jp = min(NY - 1, j + 1); 
+      
+      float denomY = max(0.000001f, (jp - jm) * dy); 
+      float denomX = max(0.000001f, (ip - im) * dx); 
+      
+      float dPsiXdy = (psiX[i][jp] - psiX[i][jm]) / denomY; 
+      float dPsiXdx = (psiX[ip][j] - psiX[im][j]) / denomX; 
+      float dPsiYdy = (psiY[i][jp] - psiY[i][jm]) / denomY; 
+      float dPsiYdx = (psiY[ip][j] - psiY[im][j]) / denomX; 
+      
+      velUx[i][j] = dPsiXdy; velVx[i][j] = -dPsiXdx; 
+      velUy[i][j] = dPsiYdy; velVy[i][j] = -dPsiYdx; 
+    } 
+  }
+}
+
+float currentFlowAngle(float t) {
+  if (steadyFlow) { return 0; }
+  return radians(18.0f * sin(t * 0.72f));
+}
+
+float currentFlowSpeed(float t) {
+  if (steadyFlow) { return BASE_SPEED; }
+  return BASE_SPEED * (1.0f + 0.18f * sin(t * 0.95f + 0.6f));
+}
+
+/* ================================================================
+VELOCITY FIELD
+================================================================ */
+
+PVector velocityAt(float x, float y, float t) {
+  if (insideObstacle(x, y)) { return new PVector(0, 0); }
+
+  float angle = currentFlowAngle(t);
+  float speed = currentFlowSpeed(t);
+
+  float ax = speed * cos(angle); float ay = speed * sin(angle);
+  float bx = sampleGrid(velUx, x, y); float by = sampleGrid(velVx, x, y);
+  float cx = sampleGrid(velUy, x, y); float cy = sampleGrid(velVy, x, y);
+
+  float u = ax * bx + ay * cx; float v = ax * by + ay * cy;
+  return new PVector(u, v);
+}
+
+float sampleGrid(float[][] field, float x, float y) {
+  float gx = map(x, XMIN, XMAX, 0, NX - 1); float gy = map(y, YMIN, YMAX, 0, NY - 1);
+  gx = constrain(gx, 0, NX - 1.001f); gy = constrain(gy, 0, NY - 1.001f);
+
+  int x0 = floor(gx); int y0 = floor(gy);
+  int x1 = min(NX - 1, x0 + 1); int y1 = min(NY - 1, y0 + 1);
+
+  float tx = gx - x0; float ty = gy - y0;
+  float a = field[x0][y0]; float b = field[x1][y0];
+  float c = field[x0][y1]; float d = field[x1][y1];
+
+  return lerp(lerp(a, b, tx), lerp(c, d, tx), ty);
+}
+
+float gridX(int i) { return lerp(XMIN, XMAX, i / float(NX - 1)); }
+float gridY(int j) { return lerp(YMIN, YMAX, j / float(NY - 1)); }
+
+/* ================================================================
+OBSTACLE TESTS
+================================================================ */
+
+boolean insideObstacle(float x, float y) {
+  if (obstacleType == CYLINDER) { float r = 0.95f; return x * x + y * y < r * r; }
+  if (obstacleType == AIRFOIL) { return insideAirfoil(x, y); }
+  if (obstacleType == RECTANGLE) { return x > -1.55f && x < 1.55f && y > -0.85f && y < 0.85f; }
+  if (obstacleType == TRIANGLE) { return pointInTriangle(x, y, -1.65f, -1.15f, 1.65f, -1.15f, 0.0f, 1.35f); }
+  return false;
+}
+
+boolean insideAirfoil(float x, float y) {
+  float chord = 3.8f; float leading = -chord * 0.5f; float trailing = chord * 0.5f;
+  if (x < leading || x > trailing) { return false; }
+  float xc = (x - leading) / chord;
+  float yt = airfoilThickness(xc);
+  return abs(y) <= yt;
+}
+
+float airfoilThickness(float xc) {
+  return 5.0f * 0.12f * (0.2969f * sqrt(max(0.0f, xc))
+    - 0.1260f * xc - 0.3516f * xc * xc + 0.2843f * xc * xc * xc - 0.1015f * xc * xc * xc * xc); 
+}
+
+boolean pointInTriangle(float px, float py, float x1, float y1, float x2, float y2, float x3, float y3) {
+  float denominator = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3); 
+  if (abs(denominator) < 0.000001f) { return false; }
+  float a = ((y2 - y3) * (px - x3) + (x3 - x2) * (py - y3)) / denominator; 
+  float b = ((y3 - y1) * (px - x3) + (x1 - x3) * (py - y3)) / denominator; 
+  float c = 1.0f - a - b;
+  return a >= 0 && b >= 0 && c >= 0;
+}
+
+/* ================================================================
+DRAW ELEMENTS
+================================================================ */
+
+void drawFlowPlane() {
+  pushStyle();
+  noStroke(); fill(80, 190, 235, 45); rectMode(CENTER); rect(0, 0, WORLD_W, WORLD_H);
+  popStyle();
+}
+
+void drawGrid() {
+  pushStyle();
+  stroke(120, 210, 235, 40); strokeWeight(0.012f);
+  for (float x = XMIN; x <= XMAX; x += 1.0f) { line(x, YMIN, PLANE_Z, x, YMAX, PLANE_Z); }
+  for (float y = YMIN; y <= YMAX; y += 1.0f) { line(XMIN, y, PLANE_Z, XMAX, y, PLANE_Z); }
+  popStyle();
+}
+
+void drawStreamlines() {
+  pushStyle();
+  noFill(); stroke(STREAM_COLOR); strokeWeight(0.030f);
+  for (int k = 0; k < STREAMLINE_COUNT; k++) {
+    float sy = map(k, 0, STREAMLINE_COUNT - 1, -3.9f, 3.9f); 
+    drawOneStreamline(-5.3f, sy); 
+  }
+  popStyle();
+}
+
+void drawOneStreamline(float sx, float sy) {
+  ArrayList<PVector> points = new ArrayList<PVector>();
+  float x = sx, y = sy;
+  final float step = 0.075f;
+  final int maxSteps = 460;
+
+  for (int n = 0; n < maxSteps; n++) {
+    if (x < XMIN || x > XMAX || y < YMIN || y > YMAX) { break; } 
+    if (insideObstacle(x, y)) { break; } 
+    points.add(new PVector(x, y)); 
+    
+    PVector k1 = normalizedVelocity(x, y, flowTime); 
+    if (k1.magSq() < 0.000001f) { break; } 
+    PVector k2 = normalizedVelocity(x + k1.x * step * 0.5f, y + k1.y * step * 0.5f, flowTime); 
+    PVector k3 = normalizedVelocity(x + k2.x * step * 0.5f, y + k2.y * step * 0.5f, flowTime); 
+    PVector k4 = normalizedVelocity(x + k3.x * step, y + k3.y * step, flowTime); 
+    
+    float dx = (k1.x + 2.0f * k2.x + 2.0f * k3.x + k4.x) * step / 6.0f; 
+    float dy = (k1.y + 2.0f * k2.y + 2.0f * k3.y + k4.y) * step / 6.0f; 
+    float nx = x + dx; float ny = y + dy; 
+    
+    if (insideObstacle(nx, ny)) { break; } 
+    x = nx; y = ny; 
+  }
+
+  if (points.size() < 2) { return; }
+  beginShape(); for (PVector p : points) { vertex(p.x, p.y, PLANE_Z + 0.04f); } endShape();
+  drawStreamlineMarkers(points);
+}
+
+void drawStreamlineMarkers(ArrayList<PVector> points) {
+  if (points.size() < 12) { return; }
+  float total = points.size();
+  float phase = flowTime * streamlineMarkerSpeed * 12.0f;
+  int[] markerColors = { STREAM_DOT_RED, STREAM_DOT_BLUE, STREAM_DOT_GREEN };
+  float[] offsets = { 0.0f, 0.333f, 0.666f };
+
+  for (int q = 0; q < STREAM_DOTS_PER_LINE; q++) {
+    float f = (phase + offsets[q] * total) % total; 
+    if (f < 0) { f += total; } 
+    int index = constrain(int(f), 0, points.size() - 1); 
+    PVector p = points.get(index); 
+    float pulse = 0.060f + 0.020f * (0.5f + 0.5f * sin(flowTime * 8.0f + q * 2.0f)); 
+    
+    pushMatrix(); translate(p.x, p.y, PLANE_Z + 0.12f); noStroke(); fill(markerColors[q]); sphereDetail(7); sphere(pulse); popMatrix(); 
+  }
+}
+
+PVector normalizedVelocity(float x, float y, float t) {
+  PVector v = velocityAt(x, y, t);
+  float m = v.mag();
+  if (m < 0.000001f) { return new PVector(0, 0); }
+  v.div(m);
+  return v;
+}
+
+void drawStreaklines() {
+  pushStyle();
+  noFill(); stroke(STREAK_COLOR); strokeWeight(0.043f);
+  for (Tracer p : streakParticles) { p.drawTrail(PLANE_Z + 0.065f); }
+  popStyle();
+}
+
+void drawPathlines() {
+  pushStyle();
+  noFill(); stroke(PATH_COLOR); strokeWeight(0.034f);
+  for (Tracer p : pathParticles) { p.drawTrail(PLANE_Z + 0.050f); }
+  popStyle();
+}
+
+void drawVelocityVectors() {
+  pushStyle();
+  float pulse = 0.5f + 0.5f * sin(flowTime * 8.5f);
+  int alphaValue = int(85 + 150 * pulse);
+  stroke(245, 245, 255, alphaValue); strokeWeight(0.018f);
+
+  for (float x = -5.5f; x <= 5.5f; x += 1.15f) {
+    for (float y = -3.4f; y <= 3.4f; y += 1.15f) { 
+      if (insideObstacle(x, y)) { continue; } 
+      PVector v = velocityAt(x, y, flowTime); 
+      float magnitude = v.mag(); 
+      if (magnitude < 0.025f) { continue; } 
+      
+      PVector dir = v.copy().normalize(); 
+      float len = constrain(magnitude * 0.20f, 0.16f, 0.72f); 
+      float ex = x + dir.x * len; float ey = y + dir.y * len; 
+      line(x, y, PLANE_Z + 0.08f, ex, ey, PLANE_Z + 0.08f); 
+      drawArrowHead(ex, ey, dir.x, dir.y, 0.13f, PLANE_Z + 0.08f); 
+    } 
+  }
+  popStyle();
+}
+
+void drawYellowVelocityPointers() {
+  pushStyle(); stroke(VELOCITY_ARROW_YELLOW); strokeWeight(0.028f);
+  for (FluxPatch p : fluxPatches) {
+    PVector v = velocityAt(p.cx, p.cy, flowTime); 
+    float mag = v.mag(); 
+    if (mag < 0.001f) { continue; } 
+    v.normalize(); 
+    
+    float len = 0.55f; float sx = p.cx; float sy = p.cy; 
+    float ex = sx + v.x * len; float ey = sy + v.y * len; 
+    line(sx, sy, PLANE_Z + 0.22f, ex, ey, PLANE_Z + 0.22f); 
+    drawArrowHead(ex, ey, v.x, v.y, 0.16f, PLANE_Z + 0.22f); 
+  }
+  popStyle();
+}
+
+void drawBoundaryFluxVectors() {
+  pushStyle();
+  strokeWeight(0.035f);
+
+  for (FluxPatch p : fluxPatches) {
+    int count = p.sampleCountForNormals(); 
+    
+    for (int i = 0; i < count; i++) { 
+      PVector p1 = p.boundaryPoint(i, count);
+      PVector p2 = p.boundaryPoint((i + 1) % count, count);
+      
+      // Compute midpoint of the segment
+      float mx = (p1.x + p2.x) * 0.5f;
+      float my = (p1.y + p2.y) * 0.5f;
+      
+      if (insideObstacle(mx, my)) { continue; } 
+      
+      float dx = p2.x - p1.x;
+      float dy = p2.y - p1.y;
+      float ds = sqrt(dx * dx + dy * dy);
+      if(ds < 0.000001f) continue;
+      
+      // Outward normal
+      PVector normal = new PVector(dy/ds, -dx/ds);
+      PVector v = velocityAt(mx, my, flowTime);
+      float dot = v.x * normal.x + v.y * normal.y;
+      
+      if (v.magSq() < 0.001f) continue;
+      
+      PVector vNorm = v.copy().normalize();
+      float len = 0.15f + 0.20f * v.mag(); // Arrow length dependent on speed
+      float ex = mx + vNorm.x * len; 
+      float ey = my + vNorm.y * len; 
+      
+      // Green if Flux is OUT (dot > 0), Sky Blue if Flux is IN (dot <= 0)
+      if (dot > 0) {
+        stroke(50, 255, 100, 240); // GREEN
+      } else {
+        stroke(135, 206, 235, 240); // SKY BLUE
+      }
+      
+      line(mx, my, PLANE_Z + 0.20f, ex, ey, PLANE_Z + 0.20f); 
+      drawArrowHead(ex, ey, vNorm.x, vNorm.y, 0.10f, PLANE_Z + 0.20f); 
+    } 
+  }
+  popStyle();
+}
+
+void drawArrowHead(float x, float y, float dx, float dy, float size, float z) {
+  float px = -dy; float py = dx;
+  float bx = x - dx * size; float by = y - dy * size;
+  float lx = bx + px * size * 0.45f; float ly = by + py * size * 0.45f;
+  float rx = bx - px * size * 0.45f; float ry = by - py * size * 0.45f;
+
+  line(x, y, z, lx, ly, z); line(x, y, z, rx, ry, z);
+}
+
+/* ================================================================
+CURL FAN (VORTICITY / CIRCULATION)
+================================================================ */
+
+class CurlFan {
+  float x, y;
+  float angle = 0;
+  float curlVal = 0;
+  float circulation = 0;
+  float radius = 0.45f;
+  
+  float screenPosX, screenPosY;
+
+  CurlFan(float _x, float _y) {
+    x = _x; y = _y;
+  }
+
+  void update(float dt) {
+    float h = 0.025f;
+    PVector vxPlus = velocityAt(x + h, y, flowTime); PVector vxMinus = velocityAt(x - h, y, flowTime);
+    PVector vyPlus = velocityAt(x, y + h, flowTime); PVector vyMinus = velocityAt(x, y - h, flowTime);
+    
+    float dvDx = (vxPlus.y - vxMinus.y) / (2.0f * h);
+    float duDy = (vyPlus.x - vyMinus.x) / (2.0f * h);
+    
+    curlVal = dvDx - duDy;
+    
+    // STRICT NUMERICAL ROTATION: Angular velocity is exactly half of the vorticity (curl)
+    angle += curlVal * 0.5f * dt; 
+    
+    float area = PI * radius * radius;
+    circulation = curlVal * area;
+  }
+
+  void draw() {
+    pushMatrix(); translate(x, y, PLANE_Z + 0.15f);
+    screenPosX = screenX(0, 0, 0); screenPosY = screenY(0, 0, 0);
+
+    pushStyle();
+    noFill(); stroke(255, 140, 40, 200); strokeWeight(0.018f); ellipse(0, 0, radius * 2, radius * 2);
+
+    rotate(angle);
+    stroke(255, 180, 40, 255); strokeWeight(0.035f);
+    line(-radius * 0.8f, 0, radius * 0.8f, 0); line(0, -radius * 0.8f, 0, radius * 0.8f);
+    
+    fill(255, 100, 40); noStroke(); ellipse(0, 0, 0.1f, 0.1f);
+    popStyle(); popMatrix();
+  }
+}
+
+void updateCurlFans(float dt) { for (CurlFan fan : curlFans) { fan.update(dt); } }
+void drawCurlFans() { for (CurlFan fan : curlFans) { fan.draw(); } }
+
+void drawCurlFanLabels() {
+  pushStyle(); textAlign(CENTER, BOTTOM); textSize(12);
+  for (CurlFan f : curlFans) {
+    String txt1 = "Curl: " + nf(f.curlVal, 1, 3); String txt2 = "Circ: " + nf(f.circulation, 1, 3);
+    float w = max(textWidth(txt1), textWidth(txt2)) + 16;
+    
+    fill(5, 12, 20, 215); noStroke(); rectMode(CENTER); rect(f.screenPosX, f.screenPosY - 32, w, 38, 8);
+    fill(255, 190, 60); text(txt1, f.screenPosX, f.screenPosY - 34); text(txt2, f.screenPosX, f.screenPosY - 17);
+  }
+  popStyle();
+}
+
+/* ================================================================
+DIVERGENCE / FLUX PATCH INITIALIZATION & UPDATES
+================================================================ */
+
+void initializeFluxPatches() {
+  fluxPatches.clear();
+  fluxPatches.add(new FluxPatch(PATCH_SQUARE, -3.2f, 2.15f, 1.15f, 1.15f));
+  fluxPatches.add(new FluxPatch(PATCH_CIRCLE, 2.85f, 2.55f, 0.62f, 0.62f));
+  fluxPatches.add(new FluxPatch(PATCH_TRIANGLE, -3.2f, -2.30f, 1.20f, 1.20f));
+  fluxPatches.add(new FluxPatch(PATCH_RECTANGLE, 3.05f, -2.35f, 1.60f, 0.90f));
+  fluxPatches.add(new FluxPatch(PATCH_SMILEY, 4.65f, 1.00f, 0.62f, 0.62f));
+}
+
+void updateFluxPatches(float dt) { for (FluxPatch p : fluxPatches) { p.updateMeasurements(dt); } }
+void drawFluxPatches() { for (FluxPatch p : fluxPatches) { p.draw(); } }
+
+class FluxPatch {
+  int type;
+  float cx, cy, originalCx, originalCy;
+  float baseA, baseB;
+  
+  float divergence, numericalFlux, patchArea;
+  float currentScale = 1.0f, targetScale = 1.0f;
+
+  // New variables to count vectors that point IN vs OUT
+  float sumIn = 0;
+  float sumOut = 0;
+  int countIn = 0;
+  int countOut = 0;
+
+  FluxPatch(int t, float x, float y, float a, float b) {
+    type = t; cx = x; cy = y; originalCx = x; originalCy = y; baseA = a; baseB = b; 
+  }
+
+  float getEffectiveScale() { return currentScale * globalPatchScale; }
+
+  void updateMeasurements(float dt) {
+    if (movePatches && dt > 0) { 
+      if (!insideObstacle(cx, cy)) { 
+        PVector v1 = velocityAt(cx, cy, flowTime); 
+        PVector v2 = velocityAt(cx + v1.x * dt * 0.5f, cy + v1.y * dt * 0.5f, flowTime + dt * 0.5f); 
+        PVector v3 = velocityAt(cx + v2.x * dt * 0.5f, cy + v2.y * dt * 0.5f, flowTime + dt * 0.5f); 
+        PVector v4 = velocityAt(cx + v3.x * dt, cy + v3.y * dt, flowTime + dt); 
+        
+        float dx = (v1.x + 2.0f * v2.x + 2.0f * v3.x + v4.x) * dt / 6.0f; 
+        float dy = (v1.y + 2.0f * v2.y + 2.0f * v3.y + v4.y) * dt / 6.0f; 
+        float nx = cx + dx; float ny = cy + dy; 
+        
+        if (insideObstacle(nx, ny)) { 
+          PVector tangent = new PVector(-dy, dx); 
+          if (tangent.magSq() > 0.000001f) { 
+            tangent.normalize(); float amount = max(sqrt(dx * dx + dy * dy), 0.015f); 
+            float tx = cx + tangent.x * amount; float ty = cy + tangent.y * amount; 
+            if (!insideObstacle(tx, ty)) { nx = tx; ny = ty; } else { nx = cx; ny = cy; } 
+          } else { nx = cx; ny = cy; } 
+        } 
+        cx = nx; cy = ny; 
+      } 
+      if (cx < XMIN - 1.5f || cx > XMAX + 1.5f || cy < YMIN - 1.5f || cy > YMAX + 1.5f) { cx = originalCx; cy = originalCy; } 
+    } 
+    
+    divergence = localDivergence(cx, cy, flowTime); 
+    numericalFlux = calculateNumericalFlux(); // This also calculates the requested In/Out counts
+    patchArea = calculatePatchArea(); 
+    
+    float visual = constrain(divergence * divergenceVisualGain, -0.30f, 0.30f); 
+    targetScale = 1.0f + visual; 
+    currentScale = lerp(currentScale, targetScale, 0.12f); 
+  }
+
+  float localDivergence(float x, float y, float t) {
+    float h = 0.025f; 
+    PVector vxPlus = velocityAt(x + h, y, t); PVector vxMinus = velocityAt(x - h, y, t); 
+    PVector vyPlus = velocityAt(x, y + h, t); PVector vyMinus = velocityAt(x, y - h, t); 
+    float duDx = (vxPlus.x - vxMinus.x) / (2.0f * h); 
+    float dvDy = (vyPlus.y - vyMinus.y) / (2.0f * h); 
+    return duDx + dvDy; 
+  }
+
+  float calculatePatchArea() {
+    if (type == PATCH_SQUARE) { float half = baseA * 0.5f; return 4.0f * half * half; } 
+    if (type == PATCH_CIRCLE || type == PATCH_SMILEY) { return PI * baseA * baseB; } 
+    if (type == PATCH_RECTANGLE) { return baseA * baseB; } 
+    if (type == PATCH_TRIANGLE) { return baseA * baseB * 0.5f; } 
+    return 1.0f; 
+  }
+
+  float calculateNumericalFlux() {
+    int count = sampleCountForNormals(); 
+    float totalFlux = 0; 
+    
+    // Reset counters for the patch HUD
+    countIn = 0; countOut = 0; sumIn = 0; sumOut = 0;
+
+    for (int i = 0; i < count; i++) { 
+      PVector p1 = boundaryPoint(i, count); 
+      PVector p2 = boundaryPoint((i + 1) % count, count); 
+      float dx = p2.x - p1.x; float dy = p2.y - p1.y; 
+      float ds = sqrt(dx * dx + dy * dy); 
+      if (ds < 0.000001f) { continue; } 
+      
+      float nx = dy / ds; float ny = -dx / ds; 
+      float mx = (p1.x + p2.x) * 0.5f; float my = (p1.y + p2.y) * 0.5f; 
+      if (insideObstacle(mx, my)) { continue; } 
+      
+      PVector v = velocityAt(mx, my, flowTime); 
+      float dotProd = (v.x * nx + v.y * ny);
+      float segmentFlux = dotProd * ds; 
+      
+      // Categorize IN vs OUT
+      if (dotProd > 0) {
+        countOut++;
+        sumOut += segmentFlux;
+      } else if (dotProd < 0) {
+        countIn++;
+        sumIn += abs(segmentFlux); // Log as positive magnitude for easy reading
+      }
+      
+      totalFlux += segmentFlux; 
+    } 
+    return totalFlux; 
+  }
+
+  int sampleCountForNormals() {
+    // Dynamic sample count governed by the slider!
+    return max(4, (int)fluxSampleCount); 
+  }
+
+  PVector boundaryPoint(int index, int count) {
+    float f = index / float(count); 
+    if (type == PATCH_CIRCLE || type == PATCH_SMILEY) { 
+      float theta = TWO_PI * f; float rx = baseA * getEffectiveScale(); float ry = baseB * getEffectiveScale(); 
+      return new PVector(cx + rx * cos(theta), cy + ry * sin(theta)); 
+    } 
+    if (type == PATCH_SQUARE) { return rectanglePerimeterPoint(cx, cy, baseA * getEffectiveScale(), baseA * getEffectiveScale(), f); } 
+    if (type == PATCH_RECTANGLE) { return rectanglePerimeterPoint(cx, cy, baseA * getEffectiveScale(), baseB * getEffectiveScale(), f); } 
+    if (type == PATCH_TRIANGLE) { return trianglePerimeterPoint(f); } 
+    return new PVector(cx, cy); 
+  }
+
+  PVector rectanglePerimeterPoint(float x, float y, float w, float h, float f) {
+    float hw = w * 0.5f; float hh = h * 0.5f; 
+    if (f < 0.25f) { float q = f / 0.25f; return new PVector(x - hw + q * w, y - hh); } 
+    if (f < 0.50f) { float q = (f - 0.25f) / 0.25f; return new PVector(x + hw, y - hh + q * h); } 
+    if (f < 0.75f) { float q = (f - 0.50f) / 0.25f; return new PVector(x + hw - q * w, y + hh); } 
+    float q = (f - 0.75f) / 0.25f; return new PVector(x - hw, y + hh - q * h); 
+  }
+
+  PVector trianglePerimeterPoint(float f) {
+    float s = getEffectiveScale(); 
+    PVector a = new PVector(cx - baseA * 0.5f * s, cy - baseB * 0.5f * s); 
+    PVector b = new PVector(cx + baseA * 0.5f * s, cy - baseB * 0.5f * s); 
+    PVector c = new PVector(cx, cy + baseB * 0.5f * s); 
+    if (f < 0.333333f) { return interpolatePoint(a, b, f * 3.0f); } 
+    if (f < 0.666666f) { return interpolatePoint(b, c, (f - 0.333333f) * 3.0f); } 
+    return interpolatePoint(c, a, (f - 0.666666f) * 3.0f); 
+  }
+
+  PVector interpolatePoint(PVector a, PVector b, float t) { return new PVector(lerp(a.x, b.x, t), lerp(a.y, b.y, t)); }
+
+  void draw() {
+    pushStyle(); 
+    if (type == PATCH_SQUARE) { drawSquarePatch(); } else if (type == PATCH_CIRCLE) { drawCircularPatch(false); } 
+    else if (type == PATCH_TRIANGLE) { drawTrianglePatch(); } else if (type == PATCH_RECTANGLE) { drawRectanglePatch(); } 
+    else if (type == PATCH_SMILEY) { drawCircularPatch(true); } 
+    popStyle(); 
+  }
+
+  void drawSquarePatch() {
+    float w = baseA * getEffectiveScale(); fill(PATCH_BLUE); stroke(PATCH_OUTLINE); strokeWeight(0.025f); rectMode(CENTER); rect(cx, cy, w, w); 
+  }
+  void drawRectanglePatch() {
+    float w = baseA * getEffectiveScale(); float h = baseB * getEffectiveScale(); fill(PATCH_BLUE); stroke(PATCH_OUTLINE); strokeWeight(0.025f); rectMode(CENTER); rect(cx, cy, w, h); 
+  }
+  void drawCircularPatch(boolean smiley) {
+    float rx = baseA * getEffectiveScale(); float ry = baseB * getEffectiveScale(); fill(PATCH_BLUE); stroke(PATCH_OUTLINE); strokeWeight(0.025f); ellipse(cx, cy, rx * 2.0f, ry * 2.0f); if (smiley) { drawSmiley(rx); } 
+  }
+  void drawTrianglePatch() {
+    float s = getEffectiveScale(); float ax = cx - baseA * 0.5f * s; float bx = cx + baseA * 0.5f * s; float ay = cy - baseB * 0.5f * s; float ty = cy + baseB * 0.5f * s; 
+    fill(PATCH_BLUE); stroke(PATCH_OUTLINE); strokeWeight(0.025f); beginShape(); vertex(ax, ay, PLANE_Z + 0.14f); vertex(bx, ay, PLANE_Z + 0.14f); vertex(cx, ty, PLANE_Z + 0.14f); endShape(CLOSE); 
+  }
+  void drawSmiley(float r) {
+    fill(10, 40, 60, 230); noStroke(); ellipse(cx - r * 0.30f, cy - r * 0.25f, r * 0.16f, r * 0.22f); ellipse(cx + r * 0.30f, cy - r * 0.25f, r * 0.16f, r * 0.22f); 
+    noFill(); stroke(10, 40, 60, 235); strokeWeight(0.045f); arc(cx, cy + r * 0.03f, r * 0.75f, r * 0.60f, 0.20f, PI - 0.20f); 
+  }
+
+  String label() {
+    if (type == PATCH_SQUARE) { return "SQUARE"; } if (type == PATCH_CIRCLE) { return "CIRCLE"; } 
+    if (type == PATCH_TRIANGLE) { return "TRIANGLE"; } if (type == PATCH_RECTANGLE) { return "RECTANGLE"; } return "SMILEY"; 
+  }
+}
+
+/* ================================================================
+DRAW OBSTACLE
+================================================================ */
+
+void drawObstacle() {
+  pushStyle();
+  if (obstacleType == CYLINDER) {
+    noStroke(); fill(35, 70, 85, 245); ellipse(0, 0, 1.90f, 1.90f); 
+    noFill(); stroke(190, 240, 255, 230); strokeWeight(0.035f); ellipse(0, 0, 1.90f, 1.90f); 
+  } else if (obstacleType == AIRFOIL) {
+    noStroke(); fill(45, 78, 90, 245); drawAirfoilShape(PLANE_Z + 0.09f); 
+    noFill(); stroke(190, 240, 255, 230); strokeWeight(0.035f); drawAirfoilOutline(PLANE_Z + 0.11f); 
+  } else if (obstacleType == RECTANGLE) {
+    noStroke(); fill(45, 72, 82, 245); rectMode(CENTER); rect(0, 0, 3.10f, 1.70f); 
+    noFill(); stroke(190, 240, 255, 230); strokeWeight(0.035f); rect(0, 0, 3.10f, 1.70f); 
+  } else if (obstacleType == TRIANGLE) {
+    noStroke(); fill(55, 78, 88, 245); 
+    beginShape(); vertex(-1.65f, -1.15f, PLANE_Z + 0.08f); vertex(1.65f, -1.15f, PLANE_Z + 0.08f); vertex(0.0f, 1.35f, PLANE_Z + 0.08f); endShape(CLOSE); 
+    noFill(); stroke(190, 240, 255, 230); strokeWeight(0.035f); 
+    beginShape(); vertex(-1.65f, -1.15f, PLANE_Z + 0.10f); vertex(1.65f, -1.15f, PLANE_Z + 0.10f); vertex(0.0f, 1.35f, PLANE_Z + 0.10f); endShape(CLOSE); 
+  }
+  popStyle();
+}
+
+void drawAirfoilShape(float z) {
+  float chord = 3.8f; float leading = -chord * 0.5f; beginShape();
+  for (int n = 0; n <= 70; n++) { float xc = n / 70.0f; float x = leading + xc * chord; float yt = airfoilThickness(xc); vertex(x, yt, z); }
+  for (int n = 70; n >= 0; n--) { float xc = n / 70.0f; float x = leading + xc * chord; float yt = airfoilThickness(xc); vertex(x, -yt, z); }
+  endShape(CLOSE);
+}
+
+void drawAirfoilOutline(float z) {
+  float chord = 3.8f; float leading = -chord * 0.5f; beginShape();
+  for (int n = 0; n <= 70; n++) { float xc = n / 70.0f; float x = leading + xc * chord; float yt = airfoilThickness(xc); vertex(x, yt, z); }
+  for (int n = 70; n >= 0; n--) { float xc = n / 70.0f; float x = leading + xc * chord; float yt = airfoilThickness(xc); vertex(x, -yt, z); }
+  endShape(CLOSE);
+}
+
+void drawStreakSource() {
+  pushStyle(); noStroke(); fill(255, 35, 55, 255);
+  pushMatrix(); translate(streakSourceX, streakSourceY, PLANE_Z + 0.13f); sphereDetail(10); sphere(0.12f); popMatrix(); popStyle();
+}
+
+/* ================================================================
+INITIAL PATH PARTICLES
+================================================================ */
+
+void initializePathParticles() {
+  pathParticles.clear();
+  float[] ys = { -3.4f, -2.8f, -2.2f, -1.6f, -1.0f, -0.35f, 0.35f, 1.0f, 1.6f, 2.2f, 2.8f, 3.4f };
+  for (int i = 0; i < ys.length; i++) { float x = -4.4f - (i % 3) * 0.25f; pathParticles.add(new Tracer(x, ys[i], PATH_COLOR)); }
+}
+
+void resetStreakline() {
+  streakParticles.clear();
+  int initialCount = int(constrain(streakReleaseRate * 1.5f, 8, 45)); 
+  for (int i = 0; i < initialCount; i++) { Tracer p = new Tracer(streakSourceX, streakSourceY, STREAK_COLOR); p.age = i / streakReleaseRate; p.advanceHistory(p.age); streakParticles.add(p); }
+  streakSpawnAccumulator = 0;
+}
+
+void updateStreakParticles(float dt) {
+  streakSpawnAccumulator += dt * streakReleaseRate;
+  while (streakSpawnAccumulator >= 1.0f) { streakSpawnAccumulator -= 1.0f; streakParticles.add(new Tracer(streakSourceX, streakSourceY, STREAK_COLOR)); }
+  for (int i = streakParticles.size() - 1; i >= 0; i--) { Tracer p = streakParticles.get(i); p.update(dt, true); if (p.age > 13.0f || p.outsideDomain()) { streakParticles.remove(i); } }
+}
+
+void updatePathParticles(float dt) { for (Tracer p : pathParticles) { p.update(dt, false); } }
+
+/* ================================================================
+TRACER CLASS
+================================================================ */
+
+class Tracer {
+  PVector pos; ArrayList<PVector> trail; int particleColor; float age = 0;
+  Tracer(float x, float y, int c) { pos = new PVector(x, y); trail = new ArrayList<PVector>(); particleColor = c; trail.add(pos.copy()); }
+  void update(float dt, boolean streakMode) {
+    if (insideObstacle(pos.x, pos.y)) { return; } 
+    PVector v1 = velocityAt(pos.x, pos.y, flowTime); 
+    PVector v2 = velocityAt(pos.x + v1.x * dt * 0.5f, pos.y + v1.y * dt * 0.5f, flowTime + dt * 0.5f); 
+    PVector v3 = velocityAt(pos.x + v2.x * dt * 0.5f, pos.y + v2.y * dt * 0.5f, flowTime + dt * 0.5f); 
+    PVector v4 = velocityAt(pos.x + v3.x * dt, pos.y + v3.y * dt, flowTime + dt); 
+    float dx = (v1.x + 2.0f * v2.x + 2.0f * v3.x + v4.x) * dt / 6.0f; float dy = (v1.y + 2.0f * v2.y + 2.0f * v3.y + v4.y) * dt / 6.0f; 
+    float nx = pos.x + dx; float ny = pos.y + dy; 
+    if (insideObstacle(nx, ny)) { 
+      PVector tangent = new PVector(-dy, dx); 
+      if (tangent.magSq() > 0.000001f) { 
+        tangent.normalize(); float amount = max(sqrt(dx * dx + dy * dy), 0.015f); float tx = pos.x + tangent.x * amount; float ty = pos.y + tangent.y * amount; 
+        if (!insideObstacle(tx, ty)) { nx = tx; ny = ty; } else { nx = pos.x; ny = pos.y; } 
+      } else { nx = pos.x; ny = pos.y; } 
+    } 
+    pos.x = nx; pos.y = ny; age += dt; trail.add(pos.copy()); 
+    int maxTrail = streakMode ? 240 : 300; while (trail.size() > maxTrail) { trail.remove(0); } 
+  }
+  void advanceHistory(float totalTime) { int steps = int(totalTime / 0.025f); for (int i = 0; i < steps; i++) { update(0.025f, true); } }
+  boolean outsideDomain() { return pos.x < XMIN - 0.25f || pos.x > XMAX + 0.25f || pos.y < YMIN - 0.25f || pos.y > YMAX + 0.25f; }
+  void drawTrail(float z) {
+    if (trail.size() < 2) { return; } beginShape(); for (PVector p : trail) { vertex(p.x, p.y, z); } endShape(); 
+    pushMatrix(); translate(pos.x, pos.y, z + 0.025f); noStroke(); fill(particleColor); sphereDetail(6); sphere(0.055f); popMatrix(); 
+  }
+}
+
+String getShapeName(int type) {
+  if (type == CYLINDER) { return "CYLINDER"; } if (type == AIRFOIL) { return "AIRFOIL"; } 
+  if (type == RECTANGLE) { return "RECTANGLE"; } if (type == TRIANGLE) { return "TRIANGLE"; } return "UNKNOWN";
+}
+
+/* ================================================================
+HUD
+================================================================ */
+
+void drawHUD() {
+  pushStyle(); noStroke(); fill(5, 12, 20, 230); rect(0, 0, width, 115);
+  textAlign(PApplet.LEFT, PApplet.TOP); fill(245); textSize(21); text("FLUID FLOW LAB", 18, 7);
+  
+  textSize(12);
+  fill(35, 235, 255); text("CYAN = STREAMLINE", 18, 37);
+  fill(255, 45, 55); text("RED = STREAKLINE", 166, 37);
+  fill(255, 220, 40); text("YELLOW = PATHLINE", 310, 37);
+  fill(245); text("WHITE = VELOCITY", 465, 37);
+  
+  fill(255, 180, 40); text("ORANGE = CURL FAN (TAP TO PLACE)", 18, 54);
+  fill(50, 255, 100); text("GREEN VECTORS = FLUX OUT", 260, 54);
+  fill(135, 206, 235); text("SKY BLUE VECTORS = FLUX IN", 450, 54);
+
+  textSize(11); fill(235); text("Obstacle: " + shapeName, 18, 76);
+  if (steadyFlow) { fill(90, 240, 180); } else { fill(255, 145, 100); } text(steadyFlow ? "STEADY FLOW" : "UNSTEADY FLOW", 18, 95);
+  fill(220); text("Streak release = " + nf(streakReleaseRate, 1, 1) + " particles/s", 165, 95);
+  fill(210); text("Blue patches: +div expands / -div contracts", 390, 95);
+
+  textAlign(PApplet.RIGHT, PApplet.TOP); fill(220);
+  text("t = " + nf(flowTime, 1, 2), width - 18, 10); text("Speed = " + nf(currentFlowSpeed(flowTime), 1, 2), width - 18, 28);
+  text("Drag = Rotate 3D", width - 18, 46); fill(255, 180, 40); text("Tap = Place Rotating Curl Fan", width - 18, 64);
+  popStyle();
+}
+
+void drawLegendAndControls() {
+  pushStyle();
+  int panelHeight = 120; // Expanded to fit 3rd slider
+  int panelY = height - 256;
+
+  fill(5, 12, 20, 240); noStroke(); rect(0, panelY, width, panelHeight);
+  float trackLeft = 145; float trackRight = width - 120;
+
+  // 1: Patch Size Slider
+  int patchY = height - 223;
+  textAlign(PApplet.LEFT, PApplet.CENTER); textSize(12); fill(245); text("PATCH SIZE", 14, patchY);
+  float patchX = map(globalPatchScale, 0.2f, 3.0f, trackLeft, trackRight);
+  stroke(120, 210, 235, 130); strokeWeight(5); line(trackLeft, patchY, trackRight, patchY);
+  noStroke(); fill(30, 210, 255); ellipse(patchX, patchY, 22, 22);
+  fill(245); textAlign(PApplet.RIGHT, PApplet.CENTER); text(nf(globalPatchScale, 1, 2) + "x", width - 12, patchY);
+
+  // 2: Streak Release Slider
+  int streakY = height - 183;
+  textAlign(PApplet.LEFT, PApplet.CENTER); text("STREAK RELEASE", 14, streakY);
+  float sliderX = map(streakReleaseRate, 1, 35, trackLeft, trackRight);
+  stroke(120, 210, 235, 130); strokeWeight(5); line(trackLeft, streakY, trackRight, streakY);
+  noStroke(); fill(255, 55, 65); ellipse(sliderX, streakY, 22, 22);
+  fill(245); textAlign(PApplet.RIGHT, PApplet.CENTER); text(nf(streakReleaseRate, 1, 1) + " / sec", width - 12, streakY);
+  
+  // 3: Boundary Vectors Slider (NEW)
+  int sampleY = height - 143;
+  textAlign(PApplet.LEFT, PApplet.CENTER); text("FLUX VECTORS", 14, sampleY);
+  float sampleX = map(fluxSampleCount, 4, 100, trackLeft, trackRight);
+  stroke(120, 210, 235, 130); strokeWeight(5); line(trackLeft, sampleY, trackRight, sampleY);
+  noStroke(); fill(50, 255, 100); ellipse(sampleX, sampleY, 22, 22);
+  fill(245); textAlign(PApplet.RIGHT, PApplet.CENTER); text((int)fluxSampleCount + " count", width - 12, sampleY);
+
+  int y = height - 76; int margin = 8; int gap = 6;
+  int available = width - margin * 2 - gap * 6; int bw = available / 7;
+  drawButton(0, margin, y, bw, 58, "< PREV", false); drawButton(1, margin + (bw + gap), y, bw, 58, shapeName, true); drawButton(2, margin + (bw + gap) * 2, y, bw, 58, "NEXT >", false); drawButton(3, margin + (bw + gap) * 3, y, bw, 58, steadyFlow ? "UNSTDY" : "STEADY", false); drawButton(4, margin + (bw + gap) * 4, y, bw, 58, movePatches ? "FIXED" : "DRIFT", false); drawButton(5, margin + (bw + gap) * 5, y, bw, 58, paused ? "PLAY" : "PAUSE", false); drawButton(6, margin + (bw + gap) * 6, y, bw, 58, "RESET", false);
+  popStyle();
+}
+
+void drawButton(int id, int x, int y, int w, int h, String label, boolean selected) {
+  if (selected) { fill(40, 160, 190, 225); } else { fill(30, 48, 60, 235); }
+  stroke(120, 210, 235, 160); strokeWeight(1); rect(x, y, w, h, 9);
+  noStroke(); fill(245); textAlign(PApplet.CENTER, PApplet.CENTER); textSize(11); text(label, x + w * 0.5f, y + h * 0.5f);
+}
+
+void drawPatchInformation() {
+  pushStyle();
+  int panelW = 480; int panelH = 220; 
+  int px = width - panelW - 10; int py = 118;
+  fill(5, 12, 20, 220); noStroke(); rect(px, py, panelW, panelH, 10);
+  
+  textAlign(PApplet.LEFT, PApplet.TOP); fill(100, 220, 255); textSize(14);
+  text("DIVERGENCE & BOUNDARY FLUX", px + 12, py + 10);
+  
+  textSize(11); fill(235);
+  text("Why? Net Flux is the sum of vectors going OUT minus vectors coming IN.", px + 12, py + 30);
+  fill(50, 255, 100); text("GREEN = Flux Out (+Expansion)", px + 12, py + 46);
+  fill(135, 206, 235); text("SKY BLUE = Flux In (-Compression)", px + 240, py + 46);
+
+  for (int i = 0; i < fluxPatches.size(); i++) {
+    FluxPatch p = fluxPatches.get(i); 
+    float yy = py + 72 + i * 26; // Spacing for 5 patches
+    
+    // Colored Label based on Net behavior
+    if (p.numericalFlux > 0.0001f) { fill(50, 255, 100); } 
+    else if (p.numericalFlux < -0.0001f) { fill(135, 206, 235); } 
+    else { fill(225); }
+    text(p.label(), px + 12, yy); 
+    
+    // Break down IN and OUT counts and Net Calculation
+    fill(235); 
+    String info = "IN: " + p.countIn + " (" + nf(p.sumIn, 1, 2) + ")  |  OUT: " + p.countOut + " (" + nf(p.sumOut, 1, 2) + ")  =>  NET: " + nf(p.numericalFlux, 1, 3);
+    text(info, px + 90, yy);
+  }
+  popStyle();
+}
+
+void updatePatchSlider(float touchX) {
+  float trackLeft = 145; float trackRight = width - 120;
+  float value = map(touchX, trackLeft, trackRight, 0.2f, 3.0f);
+  globalPatchScale = constrain(value, 0.2f, 3.0f);
+}
+
+void updateReleaseSlider(float touchX) {
+  float trackLeft = 145; float trackRight = width - 120;
+  float value = map(touchX, trackLeft, trackRight, 1, 35);
+  streakReleaseRate = constrain(value, 1, 35);
+}
+
+void updateSampleSlider(float touchX) {
+  float trackLeft = 145; float trackRight = width - 120;
+  float value = map(touchX, trackLeft, trackRight, 4, 100);
+  fluxSampleCount = constrain(value, 4, 100);
+}
+
+/* ================================================================
+RAYCAST INTERSECTION (SCREEN TO 2D PLANE IN 3D WORLD)
+================================================================ */
+
+PVector screenToWorld(float sx, float sy) {
+  float d = (height / 2.0f) / tan(PI / 6.0f); float dx = sx - width / 2.0f; float dy = sy - height / 2.0f; float dz = -d;
+  float ox1 = 0; float oy1 = d * sin(rotX); float oz1 = d * cos(rotX);
+  float dx1 = dx; float dy1 = dy * cos(rotX) + dz * sin(rotX); float dz1 = -dy * sin(rotX) + dz * cos(rotX);
+  float ox2 = oy1 * sin(rotZ); float oy2 = oy1 * cos(rotZ); float oz2 = oz1;
+  float dx2 = dx1 * cos(rotZ) + dy1 * sin(rotZ); float dy2 = -dx1 * sin(rotZ) + dy1 * cos(rotZ); float dz2 = dz1;
+  float localOx = ox2 / viewScale; float localOy = oy2 / viewScale; float localOz = oz2 / viewScale;
+  float localDx = dx2 / viewScale; float localDy = dy2 / viewScale; float localDz = dz2 / viewScale;
+
+  if (abs(localDz) < 0.0001f) return null;
+  float t = -localOz / localDz; float intX = localOx + t * localDx; float intY = localOy + t * localDy;
+  return new PVector(intX, intY);
+}
+
+/* ================================================================
+TOUCH HANDLERS
+================================================================ */
+
+void mousePressed() {
+  int patchY = height - 223;
+  int streakY = height - 183;
+  int sampleY = height - 143;
+
+  if (mouseY >= patchY - 20 && mouseY <= patchY + 20) { adjustingPatchSlider = true; updatePatchSlider(mouseX); return; }
+  if (mouseY >= streakY - 20 && mouseY <= streakY + 20) { adjustingReleaseSlider = true; updateReleaseSlider(mouseX); return; }
+  if (mouseY >= sampleY - 20 && mouseY <= sampleY + 20) { adjustingSampleSlider = true; updateSampleSlider(mouseX); return; }
+
+  pressedButton = getButtonAt(mouseX, mouseY);
+
+  if (pressedButton == -1) {
+    draggingView = true;
+    lastTouchX = mouseX; lastTouchY = mouseY;
+    tapStartX = mouseX; tapStartY = mouseY;
+    tapStartTime = millis();
+  }
+}
+
+void mouseDragged() {
+  if (adjustingPatchSlider) { updatePatchSlider(mouseX); return; }
+  if (adjustingReleaseSlider) { updateReleaseSlider(mouseX); return; }
+  if (adjustingSampleSlider) { updateSampleSlider(mouseX); return; }
+
+  if (draggingView) {
+    float dx = mouseX - lastTouchX; float dy = mouseY - lastTouchY; 
+    rotZ += dx * 0.008f; rotX += dy * 0.008f; 
+    rotX = constrain(rotX, radians(10), radians(88)); 
+    lastTouchX = mouseX; lastTouchY = mouseY; 
+  }
+}
+
+void mouseReleased() {
+  if (adjustingPatchSlider) { adjustingPatchSlider = false; return; }
+  if (adjustingReleaseSlider) { adjustingReleaseSlider = false; return; }
+  if (adjustingSampleSlider) { adjustingSampleSlider = false; return; }
+
+  if (draggingView) {
+    draggingView = false;
+    
+    // Check if it was a quick tap to place a Curl Fan
+    float distSq = (mouseX - tapStartX) * (mouseX - tapStartX) + (mouseY - tapStartY) * (mouseY - tapStartY);
+    long duration = millis() - tapStartTime;
+    
+    if (distSq < 150 && duration < 400) {
+      PVector worldPos = screenToWorld(mouseX, mouseY);
+      if (worldPos != null && worldPos.x >= XMIN && worldPos.x <= XMAX && worldPos.y >= YMIN && worldPos.y <= YMAX) {
+        curlFans.add(new CurlFan(worldPos.x, worldPos.y));
+      }
+    }
+    return;
+  }
+
+  int b = getButtonAt(mouseX, mouseY);
+  if (b == pressedButton) { executeButton(b); }
+  pressedButton = -1;
+}
+
+int getButtonAt(float x, float y) {
+  int barY = height - 76; int margin = 8; int gap = 6;
+  int available = width - margin * 2 - gap * 6; int bw = available / 7;
+  if (y < barY || y > barY + 58) { return -1; }
+  for (int i = 0; i < 7; i++) { int bx = margin + (bw + gap) * i; if (x >= bx && x <= bx + bw) { return i; } }
+  return -1;
+}
+
+void executeButton(int id) {
+  int maxShapeIndex = 3;
+  if (id == 0) { obstacleType--; if (obstacleType < 0) { obstacleType = maxShapeIndex; } buildObstacle(); resetSimulation(); }
+  else if (id == 1) { /* Label only */ }
+  else if (id == 2) { obstacleType++; if (obstacleType > maxShapeIndex) { obstacleType = 0; } buildObstacle(); resetSimulation(); }
+  else if (id == 3) { steadyFlow = !steadyFlow; }
+  else if (id == 4) { movePatches = !movePatches; }
+  else if (id == 5) { paused = !paused; }
+  else if (id == 6) { resetSimulation(); }
+}
+
+void resetSimulation() {
+  flowTime = 0; streakSpawnAccumulator = 0; paused = false;
+  initializePathParticles(); resetStreakline(); initializeFluxPatches(); curlFans.clear();
+}
+
+void backPressed() {
+  paused = true;
+}
