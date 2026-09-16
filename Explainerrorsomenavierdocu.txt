@@ -1,0 +1,691 @@
+/* ================================================================
+   3D FLUID DYNAMICS & NAVIER-STOKES EDUCATIONAL EXPLORER
+   Target: APDE (Android Processing) / P3D
+   
+   Features:
+   - Interactive 3D Pipe Flow (Laminar vs Turbulent)
+   - Enhanced Fluid Layers with Moving Velocity & Shear Vectors
+   - Single Vector Callouts (tau = mu du/dy)
+   - Boundary Layers, Airfoil Separation, Moody Diagram
+   - Smoke Eddy Particle System (Energy Cascade)
+   - CFD Methods Summary
+================================================================ */
+
+int screenNo = 0;
+int totalScreens = 11;
+boolean autoPlay = false;
+boolean isTurbulent = false;
+int selectedLayer = 1; // For interactive shear stress callouts (-3 to 3)
+float angleOfAttack = 15.0; 
+
+int lastChange = 0;
+int autoDelay = 5000;
+float pulse = 0;
+float flowOffset = 0;
+float rotX = 0.35;
+float rotY = -0.45;
+
+PFont fontMain;
+PFont fontBold;
+float W, H;
+
+// Particle system for Energy Cascade / Smoke Eddies
+int NUM_PARTICLES = 120;
+float[] px = new float[NUM_PARTICLES];
+float[] py = new float[NUM_PARTICLES];
+float[] pvx = new float[NUM_PARTICLES];
+float[] pvy = new float[NUM_PARTICLES];
+float[] pLife = new float[NUM_PARTICLES];
+
+void setup() {
+  fullScreen(P3D);
+  orientation(LANDSCAPE);
+  W = width;
+  H = height;
+  
+  // Use default sans-serif fonts optimized for Android
+  fontMain = createFont("SansSerif", 24);
+  fontBold = createFont("SansSerif", 26, true); // True for bold
+  textFont(fontMain);
+  frameRate(60);
+  
+  initParticles();
+  lastChange = millis();
+}
+
+void initParticles() {
+  for (int i = 0; i < NUM_PARTICLES; i++) {
+    resetParticle(i);
+    px[i] = random(0, W);
+  }
+}
+
+void resetParticle(int i) {
+  px[i] = random(-50, 0);
+  py[i] = random(H * 0.3, H * 0.7);
+  pvx[i] = random(2, 5);
+  pvy[i] = random(-0.5, 0.5);
+  pLife[i] = random(100, 255);
+}
+
+void draw() {
+  background(8, 14, 28);
+  pulse += 0.035;
+  flowOffset += 2.5;
+  
+  if (autoPlay && (millis() - lastChange > autoDelay)) {
+    nextScreen();
+  }
+  
+  drawGradientBackground();
+  
+  switch (screenNo) {
+    case 0: screenTitle(); break;
+    case 1: screenVariables(); break;
+    case 2: screenInteractiveShear(); break;
+    case 3: screenBoundaryLayers(); break;
+    case 4: screenReynolds(); break;
+    case 5: screenMoody(); break;
+    case 6: screenExternalFlows(); break;
+    case 7: screenEnergyCascade(); break;
+    case 8: screenNavierStokes(); break;
+    case 9: screenCFD(); break;
+    case 10: screenCollage(); break;
+  }
+  
+  drawNavigation();
+}
+
+// ================================================================
+// BACKGROUND & UI HELPERS
+// ================================================================
+void drawGradientBackground() {
+  noStroke();
+  for (int i = 0; i < 20; i++) {
+    float yy = i * H / 20.0;
+    fill(6 + i, 14 + i * 2, 32 + i * 2);
+    rect(0, yy, W, H / 20.0 + 2);
+  }
+  // Subtle ambient streamlines
+  noFill();
+  stroke(20, 80, 160, 40);
+  strokeWeight(2);
+  for (int k = 0; k < 5; k++) {
+    beginShape();
+    float baseY = H * 0.15 + k * (H * 0.16);
+    for (int x = 0; x <= W; x += 30) {
+      float y = baseY + sin(x * 0.006 + pulse + k) * 12;
+      vertex(x, y);
+    }
+    endShape();
+  }
+}
+
+void panel(float x, float y, float w, float h, int c) {
+  noStroke();
+  fill(0, 0, 0, 100);
+  rect(x + 5, y + 6, w, h, 14); // Shadow
+  fill(c);
+  rect(x, y, w, h, 14);
+  noFill();
+  stroke(60, 160, 240, 140);
+  strokeWeight(2);
+  rect(x, y, w, h, 14);
+}
+
+void titleText(String main, String sub) {
+  textFont(fontBold);
+  textAlign(CENTER, CENTER);
+  fill(255);
+  textSize(32);
+  text(main, W / 2, 45);
+  fill(100, 220, 255);
+  textFont(fontMain);
+  textSize(18);
+  text(sub, W / 2, 85);
+}
+
+void smallTitle(String s, float x, float y) {
+  textFont(fontBold);
+  textAlign(LEFT, CENTER);
+  fill(255, 220, 50);
+  textSize(20);
+  text(s, x, y);
+  textFont(fontMain);
+}
+
+void equationText(String s, float x, float y, float sz) {
+  textAlign(LEFT, CENTER);
+  fill(245);
+  textSize(sz);
+  text(s, x, y);
+}
+
+void centerText(String s, float x, float y, float sz, int c) {
+  textAlign(CENTER, CENTER);
+  fill(c);
+  textSize(sz);
+  text(s, x, y);
+}
+
+// ================================================================
+// SCREENS
+// ================================================================
+
+void screenTitle() {
+  titleText("3D FLUID DYNAMICS & NAVIER-STOKES EXPLORER", "LAMINAR VS TURBULENT REGIMES, SHEAR STRESS & CFD");
+  
+  pushMatrix();
+  translate(W / 2, H * 0.55, 0);
+  rotateX(0.45);
+  rotateY(pulse * 0.2);
+  draw3DPipeCylinder(420, 85, isTurbulent);
+  popMatrix();
+  
+  centerText("TAP CENTER TO TOGGLE REGIME: " + (isTurbulent ? "TURBULENT" : "LAMINAR"), W / 2, H * 0.82, 22, color(255, 230, 80));
+  centerText("TAP RIGHT TO BEGIN", W / 2, H * 0.90, 20, color(120, 255, 160));
+}
+
+void screenVariables() {
+  titleText("1. FLUID FIELD VARIABLES", "CARTESIAN & CYLINDRICAL DOMAINS");
+  panel(40, 120, W * 0.46, H - 200, color(12, 45, 85));
+  smallTitle("PRIMARY PROPERTIES", 65, 155);
+  
+  int y = 210;
+  equationText("x, y, z : Spatial Coordinates (m)", 70, y, 22); y += 45;
+  equationText("u, v, w : Velocity Components (m/s)", 70, y, 22); y += 45;
+  equationText("p : Static Pressure Field (Pa)", 70, y, 22); y += 45;
+  equationText("rho : Fluid Density (kg/m3)", 70, y, 22); y += 45;
+  equationText("mu : Dynamic Viscosity (Pa.s)", 70, y, 22); y += 45;
+  equationText("tau : Shear Stress = mu (du/dy)", 70, y, 22);
+  
+  panel(W * 0.52, 120, W * 0.44, H - 200, color(8, 35, 65));
+  smallTitle("3D CYLINDRICAL DOMAIN u(r)", W * 0.55, 155);
+  
+  pushMatrix();
+  translate(W * 0.74, H * 0.55, 0);
+  rotateX(0.40); rotateY(-0.50);
+  draw3DAxes(160);
+  draw3DPipeCylinder(260, 60, false);
+  popMatrix();
+  
+  centerText("No-Slip Condition: Velocity u = 0 at Pipe Wall", W * 0.74, H * 0.84, 20, color(255, 220, 80));
+}
+
+void screenInteractiveShear() {
+  titleText("2. VISCOUS FORCE & INTER-LAYER SHEAR STRESS", "NEWTON'S LAW OF VISCOSITY (TAP LAYERS TO INSPECT)");
+  
+  // Left Panel: Single Vector Callout
+  panel(40, 120, W * 0.42, 220, color(10, 60, 110));
+  smallTitle("SINGLE VECTOR CALLOUT", 65, 155);
+  
+  float targetYNorm = selectedLayer / 3.0; 
+  float singleU = 130 * (1.0 - sq(targetYNorm));
+  float singleTau = 110 * abs(targetYNorm);
+  
+  equationText("Selected Layer y: " + nf(targetYNorm, 1, 2), 65, 200, 22);
+  equationText("Velocity Vector u(y) = " + int(singleU) + " m/s ->", 65, 240, 22);
+  equationText("Shear Stress tau = mu(du/dy) = " + int(singleTau) + " Pa", 65, 280, 22);
+  
+  // Right Panel: Governing Rules
+  panel(W * 0.48, 120, W * 0.48, 220, color(45, 35, 85));
+  smallTitle("SHEAR STRESS DISTRIBUTION", W * 0.51, 155);
+  centerText("tau(y) = mu * (du / dy)", W * 0.72, 205, 32, color(255, 225, 60));
+  centerText("Wall: Max Shear Stress (Max Gradient)", W * 0.72, 255, 20, color(255, 140, 120));
+  centerText("Center: Zero Shear Stress (du/dy = 0)", W * 0.72, 295, 20, color(120, 255, 180));
+  
+  // Bottom Panel: Animated Fluid Layers
+  panel(40, 360, W - 80, H - 460, color(15, 35, 65));
+  drawEnhancedFluidLayers(W / 2, H * 0.65);
+}
+
+void drawEnhancedFluidLayers(float cx, float cy) {
+  float channelW = W - 140;
+  float startX = cx - channelW / 2.0;
+  
+  // Solid Walls
+  stroke(220); strokeWeight(6);
+  line(startX, cy - 110, startX + channelW, cy - 110);
+  line(startX, cy + 110, startX + channelW, cy + 110);
+  
+  fill(255, 100, 100); textSize(16); textAlign(LEFT, CENTER);
+  text("NO-SLIP BOUNDARY (u = 0)", startX + 15, cy - 130);
+  text("NO-SLIP BOUNDARY (u = 0)", startX + 15, cy + 130);
+
+  // Render 7 Laminar Layers
+  for (int i = -3; i <= 3; i++) {
+    float layerY = cy + i * 28;
+    float normY = i / 3.0;
+    float layerVel = 140 * (1.0 - sq(normY)); 
+    
+    fill(20, 80, 150, (i == selectedLayer) ? 200 : 80);
+    stroke(80, 190, 255, 120);
+    strokeWeight((i == selectedLayer) ? 3 : 1);
+    rect(startX, layerY - 12, channelW, 24, 4);
+    
+    // Moving Vectors
+    int numArrows = 5;
+    for (int a = 0; a < numArrows; a++) {
+      float arrowX = startX + ((flowOffset * (layerVel / 140.0) + a * (channelW / numArrows)) % channelW);
+      
+      // Velocity Vector (u)
+      stroke(255, 230, 50); strokeWeight(3);
+      line(arrowX, layerY, arrowX + layerVel * 0.5, layerY);
+      line(arrowX + layerVel * 0.5, layerY, arrowX + layerVel * 0.5 - 8, layerY - 4);
+      line(arrowX + layerVel * 0.5, layerY, arrowX + layerVel * 0.5 - 8, layerY + 4);
+      
+      // Opposing Shear Stress Vector (tau)
+      if (abs(normY) > 0.05) {
+        float tauMag = 40 * abs(normY);
+        float tauDir = (normY > 0) ? -1 : 1; 
+        stroke(255, 90, 90); strokeWeight(2);
+        line(arrowX, layerY + 8, arrowX + tauDir * tauMag, layerY + 8);
+        line(arrowX + tauDir * tauMag, layerY + 8, arrowX + tauDir * tauMag - tauDir * 5, layerY + 4);
+        line(arrowX + tauDir * tauMag, layerY + 8, arrowX + tauDir * tauMag - tauDir * 5, layerY + 12);
+      }
+    }
+    
+    // Highlight Frame
+    if (i == selectedLayer) {
+      noFill(); stroke(255, 255, 100); strokeWeight(2);
+      rect(startX - 2, layerY - 14, channelW + 4, 28, 6);
+    }
+  }
+}
+
+void screenBoundaryLayers() {
+  titleText("3. BOUNDARY LAYERS & SKIN FRICTION", "LAMINAR VS TURBULENT VELOCITY PROFILES");
+  
+  // Laminar Layer
+  panel(40, 120, W * 0.46, H - 200, color(15, 45, 80));
+  smallTitle("LAMINAR BOUNDARY LAYER", 65, 155);
+  float lx = 90, ly = H - 150, lH = H * 0.45;
+  
+  stroke(220); strokeWeight(5); line(lx, ly, lx + W * 0.35, ly);
+  noFill(); stroke(255, 70, 70); strokeWeight(4);
+  beginShape();
+  for (int i = 0; i <= 20; i++) {
+    float nY = i / 20.0;
+    float uVal = 200 * (2 * nY - sq(nY));
+    vertex(lx + uVal, ly - nY * lH);
+  }
+  endShape();
+  
+  for (int i = 1; i <= 6; i++) {
+    float nY = i / 6.0;
+    float uVal = 200 * (2 * nY - sq(nY));
+    stroke(255, 140, 80); strokeWeight(2);
+    line(lx, ly - nY * lH, lx + uVal, ly - nY * lH);
+    line(lx + uVal, ly - nY * lH, lx + uVal - 8, ly - nY * lH - 4);
+    line(lx + uVal, ly - nY * lH, lx + uVal - 8, ly - nY * lH + 4);
+  }
+  centerText("Low Skin Friction Drag", lx + 180, ly - lH * 0.4, 22, color(100, 240, 255));
+
+  // Turbulent Layer
+  panel(W * 0.50, 120, W * 0.46, H - 200, color(40, 20, 50));
+  smallTitle("TURBULENT BOUNDARY LAYER", W * 0.53, 155);
+  float rx = W * 0.55, ry = H - 150;
+  
+  stroke(220); strokeWeight(5); line(rx, ry, rx + W * 0.35, ry);
+  fill(180); noStroke();
+  for (int g = 0; g < 15; g++) ellipse(rx + g * 22 + 10, ry + 2, 6, 6);
+  
+  noFill(); stroke(255, 70, 70); strokeWeight(4);
+  beginShape();
+  for (int i = 0; i <= 20; i++) {
+    float nY = i / 20.0;
+    float uVal = 220 * pow(nY, 1.0 / 7.0); // 1/7th Power Law
+    vertex(rx + uVal, ry - nY * lH);
+  }
+  endShape();
+  
+  stroke(255, 130, 90); strokeWeight(2);
+  for (int i = 1; i <= 6; i++) {
+    float nY = i / 6.0;
+    float uVal = 220 * pow(nY, 1.0 / 7.0);
+    beginShape();
+    for (float x = 0; x <= uVal; x += 15) {
+      vertex(rx + x, ry - nY * lH + sin(x * 0.1 + pulse * 2 + i) * 8);
+    }
+    endShape();
+  }
+  centerText("High Shear at Wall -> Larger Drag!", rx + 180, ry - lH * 0.8, 22, color(255, 180, 120));
+}
+
+void screenReynolds() {
+  titleText("4. OSBORNE REYNOLDS NUMBER (1883)", "INERTIAL FORCES VS VISCOUS FORCES");
+  panel(50, 120, W - 100, 120, color(80, 40, 15));
+  centerText("Re = (Inertial) / (Viscous) = (rho * U * D) / mu", W / 2, 180, 36, color(255, 235, 50));
+  
+  float cardW = (W - 160) / 3.0;
+  // Laminar
+  panel(50, 260, cardW, H - 360, color(10, 65, 55));
+  smallTitle("LAMINAR", 70, 295);
+  centerText("Re < 2300", 50 + cardW / 2, 345, 28, color(255));
+  equationText("* Viscous forces dominate\n* Smooth parallel layers\n* Parabolic profile", 65, 430, 20);
+  
+  // Transition
+  panel(70 + cardW, 260, cardW, H - 360, color(65, 55, 15));
+  smallTitle("TRANSITION", 90 + cardW, 295);
+  centerText("2300 < Re < 4000", 70 + cardW + cardW / 2, 345, 26, color(255));
+  equationText("* Onset of instability\n* Intermittent bursts\n* Sensitive to roughness", 85 + cardW, 430, 20);
+  
+  // Turbulent
+  panel(90 + 2 * cardW, 260, cardW, H - 360, color(75, 20, 35));
+  smallTitle("TURBULENT", 110 + 2 * cardW, 295);
+  centerText("Re > 4000", 90 + 2 * cardW + cardW / 2, 345, 28, color(255));
+  equationText("* Inertial forces dominate\n* Chaotic swirling eddies\n* Enhanced fluid mixing", 105 + 2 * cardW, 430, 20);
+}
+
+void screenMoody() {
+  titleText("5. DARCY-WEISBACH & MOODY DIAGRAM", "PIPE PRESSURE DROP & FRICTION FACTOR (f)");
+  
+  panel(40, 120, W * 0.44, H - 200, color(15, 45, 80));
+  smallTitle("DARCY-WEISBACH EQUATION", 65, 155);
+  int y = 220;
+  equationText("Delta P = f * (L/D) * (rho * U^2 / 2)", 65, y, 22); y += 60;
+  equationText("Laminar Friction (f = 64/Re):", 65, y, 22); y += 40;
+  equationText("Pressure drop proportional to U", 85, y, 20); y += 60;
+  equationText("Turbulent Flow (Colebrook):", 65, y, 22); y += 40;
+  equationText("Pressure drop proportional to U^2 !", 85, y, 20);
+  
+  panel(W * 0.50, 120, W * 0.46, H - 200, color(10, 30, 55));
+  smallTitle("MOODY DIAGRAM", W * 0.53, 155);
+  float gx = W * 0.56, gy = H - 160, gW = W * 0.36, gH = H * 0.45;
+  
+  stroke(220); strokeWeight(2);
+  line(gx, gy, gx + gW, gy); line(gx, gy, gx, gy - gH);
+  
+  stroke(100, 255, 180); strokeWeight(4);
+  line(gx + 10, gy - gH * 0.85, gx + gW * 0.25, gy - gH * 0.20);
+  
+  stroke(255, 140, 80); strokeWeight(2.5);
+  for (int c = 0; c < 5; c++) {
+    noFill(); beginShape();
+    for (float x = gx + gW * 0.35; x <= gx + gW; x += 10) {
+      float normX = (x - (gx + gW * 0.35)) / (gW * 0.65);
+      vertex(x, gy - gH * (0.25 + c * 0.14 + 0.05 * exp(-normX * 4)));
+    }
+    endShape();
+  }
+  centerText("Log(Reynolds Number)", gx + gW / 2, gy + 20, 18, color(255));
+}
+
+void screenExternalFlows() {
+  titleText("6. EXTERNAL FLOWS & BOUNDARY LAYER SEPARATION", "AIRFOIL WAKE & GOLF BALL DIMPLES");
+  
+  // Airfoil
+  panel(40, 120, W * 0.46, H - 200, color(10, 35, 60));
+  smallTitle("AIRFOIL FLOW SEPARATION", 65, 155);
+  float ax = 180, ay = H * 0.55;
+  pushMatrix();
+  translate(ax, ay); rotate(radians(-angleOfAttack));
+  fill(30, 140, 240); stroke(255); strokeWeight(2);
+  beginShape();
+  vertex(-80, 0); bezierVertex(-30, -40, 40, -30, 100, 0); bezierVertex(40, 10, -30, 10, -80, 0);
+  endShape(CLOSE);
+  popMatrix();
+  
+  noFill(); strokeWeight(2);
+  for (int s = -4; s <= 4; s++) {
+    float sy = ay + s * 30;
+    if (s < -1) {
+      stroke(220, 220, 255, 180);
+      beginShape();
+      for (float x = 60; x <= W * 0.46; x += 15) {
+        float y = sy - exp(-sq(x - ax) / 3000.0) * 60;
+        if (x > ax + 30) y += sin(x * 0.1 + pulse * 3) * 15; // Wake
+        vertex(x, y);
+      }
+      endShape();
+    } else {
+      stroke(180, 200, 240, 140); line(60, sy, W * 0.46, sy);
+    }
+  }
+  centerText("Tap left screen to increase Angle of Attack", W * 0.25, H - 120, 18, color(255, 220, 80));
+
+  // Golf Ball
+  panel(W * 0.50, 120, W * 0.46, H - 200, color(20, 30, 50));
+  smallTitle("GOLF BALL DIMPLE EFFECT", W * 0.53, 155);
+  float gx = W * 0.68, gy = H * 0.55, ballR = 60;
+  
+  fill(235); stroke(180); strokeWeight(2); ellipse(gx, gy, ballR * 2, ballR * 2);
+  fill(190); noStroke();
+  for (int d = 0; d < 12; d++) {
+    float ang = d * TWO_PI / 12.0;
+    ellipse(gx + (ballR - 10) * cos(ang), gy + (ballR - 10) * sin(ang), 10, 10);
+  }
+  
+  noFill(); stroke(220, 240, 255, 200); strokeWeight(2);
+  for (int k = -3; k <= 3; k++) {
+    float sy = gy + k * 32;
+    beginShape();
+    for (float x = W * 0.52; x <= W * 0.92; x += 15) {
+      float dist = abs(x - gx);
+      float y = sy;
+      if (dist < ballR + 35 && abs(sy - gy) < ballR + 25) {
+        float pushY = (sy < gy) ? -sqrt(sq(ballR + 20) - sq(dist)) : sqrt(sq(ballR + 20) - sq(dist));
+        if (!Float.isNaN(pushY)) y = gy + pushY;
+      }
+      vertex(x, y);
+    }
+    endShape();
+  }
+  centerText("Dimples trip flow to turbulent -> Delays separation wake!", W * 0.73, H - 120, 18, color(120, 255, 180));
+}
+
+void screenEnergyCascade() {
+  titleText("7. THE ENERGY CASCADE", "RICHARDSON'S WHIRLS & SMOKE EDDY SIMULATION");
+  
+  panel(40, 120, W * 0.42, H - 200, color(25, 20, 50));
+  smallTitle("TURBULENCE DECAY", 65, 155);
+  equationText("\"Big whirls have little whirls\n that feed on their velocity,\nAnd little whirls have lesser whirls,\n And so on to viscosity.\"", 65, 230, 24);
+  
+  int y = 380;
+  equationText("* Energy enters at large scales", 65, y, 22); y += 40;
+  equationText("* Eddies decay into smaller eddies", 65, y, 22); y += 40;
+  equationText("* Dissipates as heat via viscosity", 65, y, 22);
+  
+  panel(W * 0.48, 120, W * 0.48, H - 200, color(5, 15, 30));
+  smallTitle("ANIMATED SMOKE VORTICES", W * 0.51, 155);
+  
+  for (int i = 0; i < NUM_PARTICLES; i++) {
+    px[i] += pvx[i];
+    py[i] += pvy[i] + sin(px[i] * 0.03 + pulse * 2) * 2.5;
+    
+    float dx = px[i] - W * 0.72;
+    float dy = py[i] - H * 0.52;
+    float dist = sqrt(dx * dx + dy * dy);
+    
+    if (dist < 140) {
+      pvx[i] += -dy * 0.025;
+      pvy[i] += dx * 0.025;
+    }
+    
+    pLife[i] -= 1.0;
+    if (pLife[i] <= 0 || px[i] > W * 0.94) {
+      resetParticle(i);
+      px[i] = W * 0.50;
+      py[i] = H * 0.52 + random(-50, 50);
+    }
+    
+    fill(100, 255, 140, pLife[i]);
+    noStroke();
+    ellipse(px[i], py[i], 7, 7);
+  }
+}
+
+void screenNavierStokes() {
+  titleText("8. NAVIER-STOKES VECTOR FORM", "GOVERNING EQUATIONS OF FLUID MOTION");
+  panel(50, 140, W - 100, 240, color(20, 50, 105));
+  centerText("Continuity: div(u) = 0", W / 2, 200, 36, color(100, 255, 190));
+  centerText("Momentum: du/dt + (u . grad)u = - grad(p)/rho + nu Laplacian(u) + g", W / 2, 280, 34, color(255, 225, 70));
+  
+  panel(50, 420, W * 0.44, 250, color(10, 45, 95));
+  smallTitle("VELOCITY VECTOR FIELD", 75, 460);
+  centerText("u = (u, v, w)", W * 0.27, 540, 36, color(120, 240, 255));
+  centerText("Nonlinear Convection: (u . grad)u", W * 0.27, 610, 22, color(255));
+  
+  panel(W * 0.52, 420, W * 0.43, 250, color(55, 25, 80));
+  smallTitle("PHYSICAL BALANCES", W * 0.55, 460);
+  centerText("Inertia = Pressure + Viscosity + Gravity", W * 0.73, 540, 24, color(255, 230, 80));
+  centerText("Viscosity resists sliding layers", W * 0.73, 610, 22, color(255));
+}
+
+void screenCFD() {
+  titleText("9. COMPUTATIONAL FLUID DYNAMICS (CFD)", "NUMERICAL SIMULATION TECHNIQUES");
+  float cardW = (W - 160) / 3.0;
+  
+  panel(50, 130, cardW, H - 240, color(50, 20, 30));
+  smallTitle("1. DNS", 70, 170);
+  centerText("Direct Numerical Simulation", 50 + cardW / 2, 220, 22, color(255, 200, 100));
+  equationText("* Solves down to Kolmogorov scale\n* ALL eddies fully resolved\n* No turbulence modeling\n* Supercomputers only", 65, 310, 20);
+  
+  panel(70 + cardW, 130, cardW, H - 240, color(20, 45, 75));
+  smallTitle("2. LES", 90 + cardW, 170);
+  centerText("Large Eddy Simulation", 70 + cardW + cardW / 2, 220, 22, color(100, 220, 255));
+  equationText("* Large eddies resolved explicitly\n* Small eddies filtered/modeled\n* Moderate computational cost\n* Advanced aerodynamics", 85 + cardW, 310, 20);
+  
+  panel(90 + 2 * cardW, 130, cardW, H - 240, color(15, 60, 45));
+  smallTitle("3. RANS", 110 + 2 * cardW, 170);
+  centerText("Reynolds-Averaged N-S", 90 + 2 * cardW + cardW / 2, 220, 22, color(120, 255, 160));
+  equationText("* Time-averages N-S equations\n* ALL eddies modeled\n* Lowest computational cost\n* Industry standard (k-epsilon)", 105 + 2 * cardW, 310, 20);
+}
+
+void screenCollage() {
+  titleText("10. MASTER NAVIER-STOKES SUMMARY", "3D FLOW & PHYSICAL PRINCIPLES");
+  float margin = 20, top = 120, colW = (W - 4 * margin) / 3.0, h1 = 180;
+  
+  panel(margin, top, colW, h1, color(12, 45, 85));
+  smallTitle("CONTINUITY", margin + 15, top + 35);
+  centerText("div(u) = 0", margin + colW / 2, top + 90, 30, color(255, 220, 60));
+  centerText("Mass Conservation", margin + colW / 2, top + 140, 20, color(180, 230, 255));
+  
+  panel(margin * 2 + colW, top, colW, h1, color(65, 25, 45));
+  smallTitle("MOMENTUM", margin * 2 + colW + 15, top + 35);
+  centerText("Inertia = Pressure + Viscosity", margin * 2 + colW + colW / 2, top + 90, 22, color(255));
+  centerText("Newton's 2nd Law", margin * 2 + colW + colW / 2, top + 140, 20, color(255, 180, 120));
+  
+  panel(margin * 3 + 2 * colW, top, colW, h1, color(15, 60, 50));
+  smallTitle("VISCOUS SHEAR", margin * 3 + 2 * colW + 15, top + 35);
+  centerText("tau = mu (du / dy)", margin * 3 + 2 * colW + colW / 2, top + 90, 28, color(100, 255, 200));
+  centerText("Fluid Friction", margin * 3 + 2 * colW + colW / 2, top + 140, 20, color(200, 240, 255));
+  
+  pushMatrix();
+  translate(W / 2, H * 0.65, 0);
+  rotateX(0.40); rotateY(pulse * 0.25);
+  draw3DPipeCylinder(380, 80, isTurbulent);
+  popMatrix();
+  
+  centerText("PARABOLIC LAMINAR | TURBULENT CHAOS | CFD SOLVERS", W / 2, H - 85, 24, color(255, 235, 50));
+}
+
+// ================================================================
+// 3D RENDERERS & NAVIGATION
+// ================================================================
+
+void draw3DAxes(float L) {
+  strokeWeight(4);
+  stroke(255, 80, 80); line(0, 0, 0, L, 0, 0);
+  stroke(80, 255, 100); line(0, 0, 0, 0, L, 0);
+  stroke(80, 160, 255); line(0, 0, 0, 0, 0, L);
+}
+
+void draw3DPipeCylinder(float len, float radius, boolean turbulent) {
+  noFill(); stroke(60, 150, 240, 120); strokeWeight(2);
+  pushMatrix();
+  rotateZ(HALF_PI);
+  
+  for (int i = -4; i <= 4; i++) {
+    pushMatrix();
+    translate(0, i * (len / 8.0), 0);
+    rotateX(HALF_PI);
+    ellipse(0, 0, radius * 2, radius * 2);
+    popMatrix();
+  }
+  
+  for (int j = 0; j < 8; j++) {
+    float ang = j * TWO_PI / 8.0;
+    line(radius * cos(ang), -len / 2.0, radius * sin(ang), radius * cos(ang), len / 2.0, radius * sin(ang));
+  }
+  popMatrix();
+  
+  int steps = 7;
+  for (int i = -steps; i <= steps; i++) {
+    float r = (i / (float)steps) * radius;
+    float normR = abs(r / radius);
+    float uVal = turbulent ? 130 * pow(1.0 - normR, 1.0 / 7.0) : 160 * (1.0 - sq(normR));
+    float posX = -len / 4.0 + ((flowOffset * (uVal / 160.0)) % (len / 2.0));
+    
+    stroke(255, 200 - normR * 120, 50, 240);
+    strokeWeight(3);
+    pushMatrix();
+    translate(posX, r, 0);
+    line(0, 0, 0, uVal * 0.45, 0, 0);
+    line(uVal * 0.45, 0, 0, uVal * 0.45 - 8, -4, 0);
+    line(uVal * 0.45, 0, 0, uVal * 0.45 - 8, 4, 0);
+    popMatrix();
+  }
+}
+
+void drawNavigation() {
+  noStroke(); fill(4, 10, 22, 240); rect(0, H - 70, W, 70);
+  
+  fill(20, 65, 110); rect(20, H - 55, 120, 44, 12);
+  centerText("PREV", 80, H - 33, 18, color(255));
+  
+  fill(20, 110, 80); rect(W - 140, H - 55, 120, 44, 12);
+  centerText("NEXT", W - 80, H - 33, 18, color(255));
+  
+  fill(autoPlay ? color(160, 80, 20) : color(50, 45, 90));
+  rect(W / 2 - 60, H - 55, 120, 44, 12);
+  centerText(autoPlay ? "STOP" : "AUTO", W / 2, H - 33, 18, color(255));
+  
+  centerText((screenNo + 1) + " / " + totalScreens, W / 2, 20, 16, color(160, 210, 255));
+}
+
+void touchStarted() {
+  float tx = mouseX;
+  float ty = mouseY;
+  
+  if (ty > H - 70) {
+    if (tx < 150) previousScreen();
+    else if (tx > W - 150) nextScreen();
+    else if (tx > W / 2 - 75 && tx < W / 2 + 75) autoPlay = !autoPlay;
+    return;
+  }
+  
+  // Interactive Fluid Layer Selection (Screen 2)
+  if (screenNo == 2 && ty > 360) {
+    selectedLayer++;
+    if (selectedLayer > 3) selectedLayer = -3;
+    return;
+  }
+  
+  // Airfoil Angle Selection (Screen 6)
+  if (screenNo == 6 && tx < W * 0.48) {
+    angleOfAttack += 5.0;
+    if (angleOfAttack > 30.0) angleOfAttack = 5.0;
+    return;
+  }
+  
+  // Tap center to toggle Regime (Screens 0, 10)
+  if ((screenNo == 0 || screenNo == 10) && tx > W * 0.25 && tx < W * 0.75) {
+    isTurbulent = !isTurbulent;
+    return;
+  }
+
+  // Default tap navigation for main area
+  if (tx > W / 2) nextScreen();
+  else previousScreen();
+}
+
+void nextScreen() {
+  screenNo = (screenNo + 1) % totalScreens;
+  lastChange = millis();
+}
+
+void previousScreen() {
+  screenNo = (screenNo - 1 + totalScreens) % totalScreens;
+  lastChange = millis();
+}
