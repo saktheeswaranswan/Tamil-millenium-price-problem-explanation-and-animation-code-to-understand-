@@ -1,0 +1,1391 @@
+/*
+ 
+3D LINE INTEGRAL EXPLORER
+APDE / PROCESSING FOR ANDROID
+P3D
+ 
+# COMPLETE VERSION
+ 
+## CURVE
+ 
+x(t) = t + 0.4 cos(t)
+y(t) = t + sin(t)
+ 
+z(t) = f(x(t),y(t))
+ 
+f(x,y) = x/3 + x^2/40 + sin(y) + 4
+ 
+## PARAMETER
+ 
+0 <= t <= 25
+ 
+## THREE LINE INTEGRALS
+ 
+1. ARC LENGTH
+   ∫C f ds
+   ds = sqrt(dx^2 + dy^2 + dz^2)
+   = sqrt(x'^2 + y'^2 + z'^2) dt
+ 
+2. X DIFFERENTIAL
+   ∫C f dx
+   dx = x'(t) dt
+ 
+3. Y DIFFERENTIAL
+   ∫C f dy
+   dy = y'(t) dt
+ 
+## PROJECTIONS
+ 
+XY: z = 0
+XZ: y = 0
+YZ: x = 0
+ 
+## COLORS
+ 
+YELLOW  = f ds
+RED     = f dx
+GREEN   = f dy
+BLUE    = XY projection
+PURPLE  = XZ projection
+CYAN    = YZ projection
+ 
+## RIEMANN SUMS
+ 
+∫ f ds ≈ Σ f_i Δs_i
+∫ f dx ≈ Σ f_i Δx_i
+∫ f dy ≈ Σ f_i Δy_i
+ 
+## NAVIGATION
+ 
+PREVIOUS / NEXT buttons
+ 
+0  Introduction
+1  ds
+2  dx
+3  dy
+4  Projections
+5  Riemann sums
+6  Symbolic verification
+7  Numerical verification
+ 
+## TOUCH
+ 
+Drag       = rotate 3D scene
++/-        = Riemann resolution
+Space      = play / pause
+P          = projections
+F          = fences
+A          = axes
+S          = surface
+R          = rebuild
+ 
+=====================================================================
+*/
+ 
+// ================================================================
+// SCREEN
+// ================================================================
+ 
+int W = 140;
+int H = 95;
+ 
+// ================================================================
+// PARAMETER DOMAIN
+// ================================================================
+ 
+final float TMIN = 0.0f;
+final float TMAX = 25.0f;
+ 
+// ================================================================
+// WORLD LIMITS
+// ================================================================
+ 
+final float XMIN = -5.0f;
+final float XMAX = 30.0f;
+ 
+final float YMIN = -5.0f;
+final float YMAX = 30.0f;
+ 
+final float ZMIN = -5.0f;
+final float ZMAX = 65.0f;
+ 
+// ================================================================
+// RIEMANN RESOLUTION
+// ================================================================
+ 
+int N = 80;
+ 
+// ================================================================
+// CURVE ARRAYS
+// ================================================================
+ 
+float[] tt;
+float[] xx;
+float[] yy;
+float[] zz;
+float[] dxx;
+float[] dyy;
+float[] dzz;
+float[] dss;
+float[] dsXY;
+float[] dsXZ;
+float[] dsYZ;
+float[] ff;
+float[] riemannDS;
+float[] riemannDX;
+float[] riemannDY;
+ 
+// ================================================================
+// NUMERICAL RESULTS
+// ================================================================
+ 
+double sumDS = 0.0;
+double sumDX = 0.0;
+double sumDY = 0.0;
+ 
+double highDS = 0.0;
+double highDX = 0.0;
+double highDY = 0.0;
+ 
+// ================================================================
+// ANIMATION
+// ================================================================
+ 
+boolean playing = true;
+float animT = 0.0f;
+float animationSpeed = 0.025f;
+ 
+// ================================================================
+// MODE
+// ================================================================
+ 
+int mode = 0;
+ 
+/*
+0 = INTRODUCTION
+1 = ds
+2 = dx
+3 = dy
+4 = PROJECTIONS
+5 = RIEMANN SUMS
+6 = SYMBOLIC VERIFICATION
+7 = NUMERICAL VERIFICATION
+*/
+ 
+// ================================================================
+// VISIBILITY
+// ================================================================
+ 
+boolean showSurface = true;
+boolean showCurve = true;
+boolean showAxes = true;
+boolean showFences = true;
+boolean showProjection = true;
+boolean showText = true;
+ 
+// ================================================================
+// PROJECTION SLIDERS
+// ================================================================
+ 
+float sliderXY = 1.0f;
+float sliderXZ = 1.0f;
+float sliderYZ = 1.0f;
+ 
+// ================================================================
+// RIEMANN SLIDER
+// ================================================================
+ 
+float sliderN = 0.20f;
+ 
+// ================================================================
+// CAMERA
+// ================================================================
+
+// Adjusted to show the Z-axis straight up like 87403_2.jpg
+float rotX = 0.45f;
+float rotY = -0.55f;
+float zoom = 0.78f;
+float lastX;
+float lastY;
+boolean dragging = false;
+ 
+// ================================================================
+// COLORS
+// ================================================================
+ 
+color COL_SURFACE;
+color COL_CURVE;
+color COL_DS;
+color COL_DX;
+color COL_DY;
+color COL_XY;
+color COL_XZ;
+color COL_YZ;
+color COL_POINT;
+ 
+// ================================================================
+// SETUP
+// ================================================================
+ 
+void setup() {
+  fullScreen(P3D);
+  frameRate(60);
+  smooth(8);
+  
+  COL_SURFACE = color(60, 90, 220, 75);
+  COL_CURVE = color(20, 20, 20);
+  COL_DS = color(255, 190, 0);
+  COL_DX = color(220, 45, 45);
+  COL_DY = color(30, 160, 70);
+  COL_XY = color(40, 90, 230);
+  COL_XZ = color(155, 55, 210);
+  COL_YZ = color(20, 170, 190);
+  COL_POINT = color(255, 70, 20);
+  
+  initializeArrays();
+  calculateRiemannSums();
+  calculateHighResolutionValues();
+}
+ 
+// ================================================================
+// INITIALIZE
+// ================================================================
+ 
+void initializeArrays() {
+  tt = new float[N + 1];
+  xx = new float[N + 1];
+  yy = new float[N + 1];
+  zz = new float[N + 1];
+  dxx = new float[N];
+  dyy = new float[N];
+  dzz = new float[N];
+  dss = new float[N];
+  dsXY = new float[N];
+  dsXZ = new float[N];
+  dsYZ = new float[N];
+  ff = new float[N];
+  riemannDS = new float[N];
+  riemannDX = new float[N];
+  riemannDY = new float[N];
+  
+  buildCurve();
+}
+ 
+// ================================================================
+// CURVE X
+// ================================================================
+ 
+float curveX(float t) {
+  return t + 0.4f * cos(t);
+}
+ 
+// ================================================================
+// CURVE Y
+// ================================================================
+ 
+float curveY(float t) {
+  return t + sin(t);
+}
+ 
+// ================================================================
+// SURFACE
+// ================================================================
+ 
+float surfaceF(float x, float y) {
+  return x / 3.0f + x * x / 40.0f + sin(y) + 4.0f;
+}
+ 
+// ================================================================
+// x'(t)
+// ================================================================
+ 
+float dxdt(float t) {
+  return 1.0f - 0.4f * sin(t);
+}
+ 
+// ================================================================
+// y'(t)
+// ================================================================
+ 
+float dydt(float t) {
+  return 1.0f + cos(t);
+}
+ 
+// ================================================================
+// f_x
+// ================================================================
+ 
+float fx(float x) {
+  return 1.0f / 3.0f + x / 20.0f;
+}
+ 
+// ================================================================
+// f_y
+// ================================================================
+ 
+float fy(float y) {
+  return cos(y);
+}
+ 
+// ================================================================
+// z'(t)
+// ================================================================
+ 
+float dzdt(float t) {
+  float x = curveX(t);
+  float y = curveY(t);
+  float xp = dxdt(t);
+  float yp = dydt(t);
+  
+  return fx(x) * xp + fy(y) * yp;
+}
+ 
+// ================================================================
+// SPEED = ds/dt
+// ================================================================
+ 
+float speed(float t) {
+  float xp = dxdt(t);
+  float yp = dydt(t);
+  float zp = dzdt(t);
+  
+  return sqrt(xp * xp + yp * yp + zp * zp);
+}
+ 
+// ================================================================
+// BUILD CURVE
+// ================================================================
+ 
+void buildCurve() {
+  for (int i = 0; i <= N; i++) {
+    float t = TMAX * i / (float)N;  
+    tt[i] = t;  
+    xx[i] = curveX(t);  
+    yy[i] = curveY(t);  
+    zz[i] = surfaceF(xx[i], yy[i]);  
+  }
+}
+ 
+// ================================================================
+// RIEMANN SUMS
+// ================================================================
+ 
+void calculateRiemannSums() {
+  sumDS = 0.0;
+  sumDX = 0.0;
+  sumDY = 0.0;
+ 
+  for (int i = 0; i < N; i++) {
+    dxx[i] = xx[i + 1] - xx[i];  
+    dyy[i] = yy[i + 1] - yy[i];  
+    dzz[i] = zz[i + 1] - zz[i];  
+
+    // ============================================================  
+    // TRUE 3-D ds  
+    // ============================================================  
+    dss[i] = sqrt(dxx[i] * dxx[i] + dyy[i] * dyy[i] + dzz[i] * dzz[i]);  
+
+    // ============================================================  
+    // XY PROJECTION LENGTH  
+    // ============================================================  
+    dsXY[i] = sqrt(dxx[i] * dxx[i] + dyy[i] * dyy[i]);  
+
+    // ============================================================  
+    // XZ PROJECTION LENGTH  
+    // ============================================================  
+    dsXZ[i] = sqrt(dxx[i] * dxx[i] + dzz[i] * dzz[i]);  
+
+    // ============================================================  
+    // YZ PROJECTION LENGTH  
+    // ============================================================  
+    dsYZ[i] = sqrt(dyy[i] * dyy[i] + dzz[i] * dzz[i]);  
+
+    // ============================================================  
+    // MIDPOINT  
+    // ============================================================  
+    float tm = 0.5f * (tt[i] + tt[i + 1]);  
+    float xm = curveX(tm);  
+    float ym = curveY(tm);  
+    ff[i] = surfaceF(xm, ym);  
+
+    // ============================================================  
+    // RIEMANN TERMS  
+    // ============================================================  
+    riemannDS[i] = ff[i] * dss[i];  
+    riemannDX[i] = ff[i] * dxx[i];  
+    riemannDY[i] = ff[i] * dyy[i];  
+
+    // ============================================================  
+    // ACCUMULATE  
+    // ============================================================  
+    sumDS += riemannDS[i];  
+    sumDX += riemannDX[i];  
+    sumDY += riemannDY[i];  
+  }
+}
+ 
+// ================================================================
+// HIGH RESOLUTION NUMERICAL INTEGRATION
+// ================================================================
+ 
+void calculateHighResolutionValues() {
+  int M = 30000;
+  float dt = TMAX / (float)M;
+  double aDS = 0.0;
+  double aDX = 0.0;
+  double aDY = 0.0;
+ 
+  for (int i = 0; i < M; i++) {
+    float t = (i + 0.5f) * dt;  
+    float x = curveX(t);  
+    float y = curveY(t);  
+    float f = surfaceF(x, y);  
+    float xp = dxdt(t);  
+    float yp = dydt(t);  
+    float zp = dzdt(t);  
+    float v = sqrt(xp * xp + yp * yp + zp * zp);  
+    
+    aDS += f * v * dt;  
+    aDX += f * xp * dt;  
+    aDY += f * yp * dt;  
+  }
+ 
+  highDS = aDS;
+  highDX = aDX;
+  highDY = aDY;
+}
+ 
+// ================================================================
+// DRAW
+// ================================================================
+ 
+void draw() {
+  background(247);
+  lights();
+  pushMatrix();
+  
+  translate(width * 0.57f, height * 0.53f);
+  scale(zoom);
+  rotateX(rotX);
+  rotateY(rotY);
+  
+  drawScene();
+  popMatrix();
+ 
+  if (playing) {
+    animT += animationSpeed;  
+    if (animT > TMAX) {  
+      animT = 0;  
+    }  
+  }
+ 
+  drawHUD();
+  drawNavigation();
+}
+ 
+// ================================================================
+// SCENE
+// ================================================================
+ 
+void drawScene() {
+  if (showAxes) {
+    drawAxes();  
+  }
+  if (showSurface) {
+    drawSurface();  
+  }
+  if (showProjection) {
+    drawProjectedCurves();  
+  }
+  if (showCurve) {
+    drawCurve();  
+  }
+  if (showFences) {
+    if (mode == 1) {  
+      drawDSFences();  
+    }  
+    if (mode == 2) {  
+      drawDXFences();  
+    }  
+    if (mode == 3) {  
+      drawDYFences();  
+    }  
+    if (mode == 4) {  
+      drawProjectionFences();  
+    }  
+    if (mode == 5) {  
+      drawRiemannFences();  
+    }  
+  }
+  
+  drawMovingPoint();
+}
+ 
+// ================================================================
+// WORLD POINT (MAPPED FOR Z=UP)
+// ================================================================
+ 
+void P(float x, float y, float z) {
+  float sx = 13.0f;
+  float sy = 13.0f;
+  float sz = 6.5f;
+  
+  // Math X -> Screen X (Right)
+  // Math Z -> Screen -Y (Up)
+  // Math Y -> Screen -Z (Depth)
+  vertex(x * sx, -z * sz, -y * sy);
+}
+ 
+// ================================================================
+// 3D LINE (MAPPED FOR Z=UP)
+// ================================================================
+ 
+void line3D(float x1, float y1, float z1, float x2, float y2, float z2) {
+  float sx = 13.0f;
+  float sy = 13.0f;
+  float sz = 6.5f;
+
+  line(x1 * sx, -z1 * sz, -y1 * sy, x2 * sx, -z2 * sz, -y2 * sy);
+}
+ 
+// ================================================================
+// AXES WITH X / Y / Z LABELS
+// ================================================================
+
+void drawAxes() {
+  strokeWeight(3);
+
+  // ------------------------------------------------------------
+  // X AXIS
+  // x increases → right
+  // ------------------------------------------------------------
+  stroke(220, 50, 50);
+  line3D(XMIN, 0, 0, XMAX + 2, 0, 0);
+
+  // X-axis arrow head
+  line3D(XMAX + 2, 0, 0, XMAX + 1.2f, 0.35f, 0);
+  line3D(XMAX + 2, 0, 0, XMAX + 1.2f, -0.35f, 0);
+
+  // ------------------------------------------------------------
+  // Y AXIS
+  // y increases → into the background
+  // ------------------------------------------------------------
+  stroke(30, 150, 60);
+  line3D(0, YMIN, 0, 0, YMAX + 2, 0);
+
+  // Y-axis arrow head
+  line3D(0, YMAX + 2, 0, 0.35f, YMAX + 1.2f, 0);
+  line3D(0, YMAX + 2, 0, -0.35f, YMAX + 1.2f, 0);
+
+  // ------------------------------------------------------------
+  // Z AXIS
+  // z increases → straight upward
+  // ------------------------------------------------------------
+  stroke(40, 70, 220);
+  line3D(0, 0, ZMIN, 0, 0, ZMAX + 3);
+
+  // Z-axis arrow head
+  line3D(0, 0, ZMAX + 3, 0.35f, 0, ZMAX + 2.0f);
+  line3D(0, 0, ZMAX + 3, -0.35f, 0, ZMAX + 2.0f);
+
+  // ============================================================
+  // AXIS TICK MARKS
+  // ============================================================
+  strokeWeight(1);
+  stroke(100, 100, 100, 130);
+
+  for (int x = 0; x <= 30; x += 5) {
+    line3D(x, -0.25f, 0, x,  0.25f, 0);
+  }
+
+  for (int y = 0; y <= 30; y += 5) {
+    line3D(-0.25f, y, 0, 0.25f, y, 0);
+  }
+
+  for (int z = 0; z <= 60; z += 10) {
+    line3D(-0.25f, 0, z, 0.25f, 0, z);
+  }
+
+  // ============================================================
+  // AXIS LABELS (Translations mapped properly)
+  // ============================================================
+  fill(220, 40, 40);
+  textSize(28);
+  textAlign(CENTER, CENTER);
+
+  pushMatrix();
+  translate((XMAX + 2.8f) * 13.0f, 0, 0);
+  text("X", 0, 0);
+  popMatrix();
+
+  fill(20, 140, 60);
+  pushMatrix();
+  translate(0, 0, -(YMAX + 2.8f) * 13.0f); // Depth mapping for Y
+  text("Y", 0, 0);
+  popMatrix();
+
+  fill(30, 60, 210);
+  pushMatrix();
+  translate(0, -(ZMAX + 3.8f) * 6.5f, 0); // Vertical mapping for Z
+  text("Z", 0, 0);
+  popMatrix();
+
+  // ============================================================
+  // ORIGIN LABEL
+  // ============================================================
+  fill(30);
+  pushMatrix();
+  translate(12, -12, 0);
+  textSize(18);
+  text("O", 0, 0);
+  popMatrix();
+
+  textAlign(LEFT, TOP);
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// SURFACE
+// ================================================================
+ 
+void drawSurface() {
+  int nx = 24;
+  int ny = 24;
+  noStroke();
+  fill(COL_SURFACE);
+ 
+  for (int i = 0; i < nx; i++) {
+    float xa = XMIN + (XMAX - XMIN) * i / (float)nx;  
+    float xb = XMIN + (XMAX - XMIN) * (i + 1) / (float)nx;  
+    
+    beginShape(QUAD_STRIP);  
+    for (int j = 0; j <= ny; j++) {  
+      float y = YMIN + (YMAX - YMIN) * j / (float)ny;  
+      float za = surfaceF(xa, y);  
+      float zb = surfaceF(xb, y);  
+      
+      P(xa, y, za);  
+      P(xb, y, zb);  
+    }  
+    endShape();  
+  }
+}
+ 
+// ================================================================
+// CURVE
+// ================================================================
+ 
+void drawCurve() {
+  stroke(COL_CURVE);
+  strokeWeight(4);
+  noFill();
+  beginShape();
+  
+  for (int i = 0; i <= N; i++) {
+    P(xx[i], yy[i], zz[i]);  
+  }
+  
+  endShape();
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// PROJECTED CURVES
+// ================================================================
+ 
+void drawProjectedCurves() {
+  // XY
+  if (sliderXY > 0.05f) {
+    stroke(COL_XY, 255 * sliderXY);  
+    strokeWeight(3);  
+    noFill();  
+    
+    beginShape();  
+    for (int i = 0; i <= N; i++) {  
+      P(xx[i], yy[i], 0);  
+    }  
+    endShape();  
+  }
+ 
+  // XZ
+  if (sliderXZ > 0.05f) {
+    stroke(COL_XZ, 255 * sliderXZ);  
+    strokeWeight(3);  
+    noFill();  
+    
+    beginShape();  
+    for (int i = 0; i <= N; i++) {  
+      P(xx[i], 0, zz[i]);  
+    }  
+    endShape();  
+  }
+ 
+  // YZ
+  if (sliderYZ > 0.05f) {
+    stroke(COL_YZ, 255 * sliderYZ);  
+    strokeWeight(3);  
+    noFill();  
+    
+    beginShape();  
+    for (int i = 0; i <= N; i++) {  
+      P(0, yy[i], zz[i]);  
+    }  
+    endShape();  
+  }
+  
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// ds FENCING
+// ================================================================
+ 
+void drawDSFences() {
+  int upto = animatedIndex();
+  
+  for (int i = 0; i < upto; i++) {
+    float x1 = xx[i];  
+    float y1 = yy[i];  
+    float z1 = zz[i];  
+    float x2 = xx[i + 1];  
+    float y2 = yy[i + 1];  
+    float z2 = zz[i + 1];  
+
+    // Geometric curtain
+    stroke(COL_DS, 120);  
+    fill(COL_DS, 65);  
+    
+    beginShape(QUADS);  
+    P(x1, y1, 0);  
+    P(x2, y2, 0);  
+    P(x2, y2, z2);  
+    P(x1, y1, z1);  
+    endShape();  
+
+    // ACTUAL Δs
+    stroke(COL_DS);  
+    strokeWeight(5);  
+    line3D(x1, y1, z1, x2, y2, z2);  
+  }
+  
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// dx FENCING
+// ================================================================
+ 
+void drawDXFences() {
+  int upto = animatedIndex();
+  
+  for (int i = 0; i < upto; i++) {
+    float xm = 0.5f * (xx[i] + xx[i + 1]);  
+    float ym = 0.5f * (yy[i] + yy[i + 1]);  
+    float f = ff[i];  
+    float x1 = xx[i];  
+    float x2 = xx[i + 1];  
+
+    // Riemann rectangle in XZ plane (y = 0)
+    stroke(COL_DX, 180);  
+    fill(COL_DX, 95);  
+    
+    beginShape(QUADS);  
+    P(x1, 0, 0);  
+    P(x2, 0, 0);  
+    P(x2, 0, f);  
+    P(x1, 0, f);  
+    endShape();  
+
+    // Vertical connector from surface point
+    stroke(COL_DX, 100);  
+    strokeWeight(2);  
+    line3D(xm, ym, surfaceF(xm, ym), xm, 0, f);  
+
+    // Actual curve segment
+    stroke(COL_DX);  
+    strokeWeight(4);  
+    line3D(x1, yy[i], zz[i], x2, yy[i + 1], zz[i + 1]);  
+  }
+  
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// dy FENCING
+// ================================================================
+ 
+void drawDYFences() {
+  int upto = animatedIndex();
+  
+  for (int i = 0; i < upto; i++) {
+    float ym = 0.5f * (yy[i] + yy[i + 1]);  
+    float xm = 0.5f * (xx[i] + xx[i + 1]);  
+    float f = ff[i];  
+    float y1 = yy[i];  
+    float y2 = yy[i + 1];  
+
+    // Riemann rectangle on YZ plane (x = 0)
+    stroke(COL_DY, 180);  
+    fill(COL_DY, 95);  
+    
+    beginShape(QUADS);  
+    P(0, y1, 0);  
+    P(0, y2, 0);  
+    P(0, y2, f);  
+    P(0, y1, f);  
+    endShape();  
+
+    // Connector
+    stroke(COL_DY, 100);  
+    strokeWeight(2);  
+    line3D(xm, ym, surfaceF(xm, ym), 0, ym, f);  
+
+    // Actual curve segment
+    stroke(COL_DY);  
+    strokeWeight(4);  
+    line3D(xx[i], y1, zz[i], xx[i + 1], y2, zz[i + 1]);  
+  }
+  
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// PROJECTION FENCES
+// ================================================================
+ 
+void drawProjectionFences() {
+  int upto = animatedIndex();
+  
+  for (int i = 0; i < upto; i++) {
+    // XY
+    if (sliderXY > 0.05f) {  
+      stroke(COL_XY, 100);  
+      strokeWeight(2);  
+      line3D(xx[i], yy[i], 0, xx[i], yy[i], zz[i]);  
+    }  
+
+    // XZ
+    if (sliderXZ > 0.05f) {  
+      stroke(COL_XZ, 100);  
+      strokeWeight(2);  
+      line3D(xx[i], 0, zz[i], xx[i], yy[i], zz[i]);  
+    }  
+
+    // YZ
+    if (sliderYZ > 0.05f) {  
+      stroke(COL_YZ, 100);  
+      strokeWeight(2);  
+      line3D(0, yy[i], zz[i], xx[i], yy[i], zz[i]);  
+    }  
+  }
+  
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// RIEMANN FENCES
+// ================================================================
+ 
+void drawRiemannFences() {
+  int upto = animatedIndex();
+  
+  for (int i = 0; i < upto; i++) {
+    float x1 = xx[i];  
+    float x2 = xx[i + 1];  
+    float y1 = yy[i];  
+    float y2 = yy[i + 1];  
+    float z1 = zz[i];  
+    float z2 = zz[i + 1];  
+    float f = ff[i];  
+
+    // YELLOW: f ds
+    stroke(COL_DS, 230);  
+    strokeWeight(4);  
+    line3D(x1, y1, z1, x2, y2, z2);  
+    
+    stroke(COL_DS, 80);  
+    fill(COL_DS, 65);  
+    
+    beginShape(QUADS);  
+    P(x1, y1, 0);  
+    P(x2, y2, 0);  
+    P(x2, y2, z2);  
+    P(x1, y1, z1);  
+    endShape();  
+
+    // RED: f dx
+    stroke(COL_DX, 170);  
+    fill(COL_DX, 85);  
+    
+    beginShape(QUADS);  
+    P(x1, 0, 0);  
+    P(x2, 0, 0);  
+    P(x2, 0, f);  
+    P(x1, 0, f);  
+    endShape();  
+
+    // GREEN: f dy
+    stroke(COL_DY, 170);  
+    fill(COL_DY, 85);  
+    
+    beginShape(QUADS);  
+    P(0, y1, 0);  
+    P(0, y2, 0);  
+    P(0, y2, f);  
+    P(0, y1, f);  
+    endShape();  
+  }
+  
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// MOVING POINT
+// ================================================================
+ 
+void drawMovingPoint() {
+  float x = curveX(animT);
+  float y = curveY(animT);
+  float z = surfaceF(x, y);
+ 
+  // POINT mapped for Z = Up
+  pushMatrix();
+  translate(x * 13.0f, -z * 6.5f, -y * 13.0f);
+  noStroke();
+  fill(COL_POINT);
+  sphere(8);
+  popMatrix();
+ 
+  // TANGENT VECTOR
+  float xp = dxdt(animT);
+  float yp = dydt(animT);
+  float zp = dzdt(animT);
+  
+  float L = sqrt(xp * xp + yp * yp + zp * zp);
+  xp /= L;
+  yp /= L;
+  zp /= L;
+  
+  stroke(COL_POINT);
+  strokeWeight(4);
+  line3D(x, y, z, x + xp * 2.0f, y + yp * 2.0f, z + zp * 2.0f);
+  strokeWeight(1);
+}
+ 
+// ================================================================
+// ANIMATION INDEX
+// ================================================================
+ 
+int animatedIndex() {
+  int k = (int)(N * animT / TMAX);
+  return constrain(k, 0, N);
+}
+ 
+// ================================================================
+// MODE NAME
+// ================================================================
+ 
+String modeName() {
+  if (mode == 0) return "INTRODUCTION";
+  if (mode == 1) return "ARC LENGTH  ∫ f ds";
+  if (mode == 2) return "X DIFFERENTIAL  ∫ f dx";
+  if (mode == 3) return "Y DIFFERENTIAL  ∫ f dy";
+  if (mode == 4) return "THREE PROJECTIONS";
+  if (mode == 5) return "RIEMANN SUMS";
+  if (mode == 6) return "SYMBOLIC VERIFICATION";
+  if (mode == 7) return "NUMERICAL VERIFICATION";
+  return "";
+}
+ 
+// ================================================================
+// HUD
+// ================================================================
+ 
+void drawHUD() {
+  if (!showText) return;
+ 
+  fill(15);
+  textAlign(LEFT, TOP);
+  textSize(22);
+  text("3D LINE INTEGRAL EXPLORER", 20, 15);
+ 
+  textSize(14);
+  text("x(t) = t + 0.4 cos(t)", 20, 48);
+  text("y(t) = t + sin(t)", 20, 68);
+  text("z = f(x,y) = x/3 + x²/40 + sin(y) + 4", 20, 88);
+ 
+  // RIGHT RESULT PANEL
+  float px = width - 445;
+  float py = 20;
+ 
+  noStroke();
+  fill(255, 245);
+  rect(px, py, 425, 245, 12);
+ 
+  fill(20);
+  textSize(17);
+  text(modeName(), px + 18, py + 15);
+ 
+  textSize(14);
+ 
+  // FORMULAS
+  if (mode == 1) {
+    text("ds = √(dx² + dy² + dz²)", px + 18, py + 48);  
+    text("ds = √(x'² + y'² + z'²) dt", px + 18, py + 70);  
+    text("∫C f ds", px + 18, py + 94);  
+    text("≈ Σ fᵢ Δsᵢ", px + 18, py + 116);  
+  }
+ 
+  if (mode == 2) {
+    text("dx = x'(t) dt", px + 18, py + 48);  
+    text("x'(t) = 1 − 0.4 sin(t)", px + 18, py + 70);  
+    text("∫C f dx", px + 18, py + 94);  
+    text("≈ Σ fᵢ Δxᵢ", px + 18, py + 116);  
+    text("RED → XZ projection", px + 18, py + 145);  
+  }
+ 
+  if (mode == 3) {
+    text("dy = y'(t) dt", px + 18, py + 48);  
+    text("y'(t) = 1 + cos(t)", px + 18, py + 70);  
+    text("∫C f dy", px + 18, py + 94);  
+    text("≈ Σ fᵢ Δyᵢ", px + 18, py + 116);  
+    text("GREEN → YZ projection", px + 18, py + 145);  
+  }
+ 
+  if (mode == 4) {
+    text("XY : z = 0", px + 18, py + 48);  
+    text("XZ : y = 0", px + 18, py + 72);  
+    text("YZ : x = 0", px + 18, py + 96);  
+    text("dsXY = √(dx² + dy²)", px + 18, py + 120);  
+    text("dsXZ = √(dx² + dz²)", px + 18, py + 144);  
+    text("dsYZ = √(dy² + dz²)", px + 18, py + 168);  
+  }
+ 
+  if (mode == 5) {
+    text("YELLOW  Σ fᵢ Δsᵢ", px + 18, py + 48);  
+    text("RED     Σ fᵢ Δxᵢ", px + 18, py + 73);  
+    text("GREEN   Σ fᵢ Δyᵢ", px + 18, py + 98);  
+    text("Each rectangle = one Riemann term", px + 18, py + 128);  
+  }
+ 
+  if (mode == 6) {
+    text("x' = 1 − 0.4 sin(t)", px + 18, py + 48);  
+    text("y' = 1 + cos(t)", px + 18, py + 70);  
+    text("z' = fₓx' + fᵧy'", px + 18, py + 92);  
+    text("fₓ = 1/3 + x/20", px + 18, py + 114);  
+    text("fᵧ = cos(y)", px + 18, py + 136);  
+    text("|r'| = √(x'²+y'²+z'²)", px + 18, py + 158);  
+  }
+ 
+  if (mode == 7) {
+    text("HIGH-RESOLUTION NUMERICAL CHECK", px + 18, py + 48);  
+    text("Σ fᵢΔsᵢ = " + nf((float)sumDS, 0, 5), px + 18, py + 75);  
+    text("∫ f ds = " + nf((float)highDS, 0, 5), px + 18, py + 97);  
+    text("Σ fᵢΔxᵢ = " + nf((float)sumDX, 0, 5), px + 18, py + 122);  
+    text("∫ f dx = " + nf((float)highDX, 0, 5), px + 18, py + 144);  
+    text("Σ fᵢΔyᵢ = " + nf((float)sumDY, 0, 5), px + 18, py + 169);  
+    text("∫ f dy = " + nf((float)highDY, 0, 5), px + 18, py + 191);  
+  }
+ 
+  // GENERAL RIEMANN RESULT
+  textSize(13);
+  text("N = " + N, px + 18, py + 220);
+ 
+  // MODE
+  fill(20);
+  textSize(16);
+  text("MODE " + mode + " / 7", 20, height - 112);
+}
+ 
+// ================================================================
+// NAVIGATION
+// ================================================================
+ 
+void drawNavigation() {
+  drawButton(20, height - 75, 150, 48, "◀ PREVIOUS");
+  drawButton(180, height - 75, 150, 48, "NEXT ▶");
+  drawButton(340, height - 75, 125, 48, playing ? "PAUSE" : "PLAY");
+ 
+  drawSlider(500, height - 70, 160, sliderXY, "XY");
+  drawSlider(690, height - 70, 160, sliderXZ, "XZ");
+  drawSlider(880, height - 70, 160, sliderYZ, "YZ");
+  drawSlider(1070, height - 70, 160, sliderN, "N");
+ 
+  fill(30);
+  textSize(12);
+  text("Drag = rotate   Wheel = zoom   +/- = resolution", 20, height - 22);
+}
+ 
+// ================================================================
+// BUTTON
+// ================================================================
+ 
+void drawButton(float x, float y, float w, float h, String label) {
+  fill(235);
+  stroke(90);
+  strokeWeight(1);
+  rect(x, y, w, h, 10);
+  
+  fill(20);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  text(label, x + w * 0.5f, y + h * 0.5f);
+  textAlign(LEFT, TOP);
+}
+ 
+// ================================================================
+// SLIDER
+// ================================================================
+ 
+void drawSlider(float x, float y, float w, float value, String label) {
+  stroke(100);
+  strokeWeight(4);
+  line(x, y, x + w, y);
+  
+  float knob = x + value * w;
+  stroke(30);
+  fill(255);
+  ellipse(knob, y, 18, 18);
+  
+  fill(20);
+  textSize(12);
+  text(label, x, y - 25);
+  text(nf(value * 100, 0, 0) + "%", x + w - 35, y + 10);
+}
+ 
+// ================================================================
+// MOUSE PRESSED
+// ================================================================
+ 
+void mousePressed() {
+  lastX = mouseX;
+  lastY = mouseY;
+  dragging = true;
+ 
+  if (mouseY > height - 80 && mouseY < height - 20 && mouseX >= 20 && mouseX <= 170) {
+    previousMode();  
+    dragging = false;  
+    return;  
+  }
+ 
+  if (mouseY > height - 80 && mouseY < height - 20 && mouseX >= 180 && mouseX <= 330) {
+    nextMode();  
+    dragging = false;  
+    return;  
+  }
+ 
+  if (mouseY > height - 80 && mouseY < height - 20 && mouseX >= 340 && mouseX <= 465) {
+    playing = !playing;  
+    dragging = false;  
+    return;  
+  }
+ 
+  if (mouseY > height - 90 && mouseY < height - 45) {
+    updateSlider(mouseX);  
+    dragging = false;  
+    return;  
+  }
+}
+ 
+// ================================================================
+// SLIDER UPDATE
+// ================================================================
+ 
+void updateSlider(float mx) {
+  if (mx >= 500 && mx <= 660) {
+    sliderXY = constrain((mx - 500) / 160.0f, 0, 1);  
+  }
+  if (mx >= 690 && mx <= 850) {
+    sliderXZ = constrain((mx - 690) / 160.0f, 0, 1);  
+  }
+  if (mx >= 880 && mx <= 1040) {
+    sliderYZ = constrain((mx - 880) / 160.0f, 0, 1);  
+  }
+  if (mx >= 1070 && mx <= 1230) {
+    sliderN = constrain((mx - 1070) / 160.0f, 0, 1);  
+    int newN = 20 + (int)(sliderN * 180);  
+    
+    if (newN != N) {  
+      N = newN;  
+      initializeArrays();  
+      calculateRiemannSums();  
+    }  
+  }
+}
+ 
+// ================================================================
+// MOUSE DRAGGED
+// ================================================================
+ 
+void mouseDragged() {
+  if (mouseY > height - 90 && mouseY < height - 45) {
+    updateSlider(mouseX);  
+    return;  
+  }
+ 
+  float dx = mouseX - lastX;
+  float dy = mouseY - lastY;
+  rotY += dx * 0.008f;
+  rotX += dy * 0.008f;
+  
+  lastX = mouseX;
+  lastY = mouseY;
+}
+ 
+// ================================================================
+// MOUSE RELEASED
+// ================================================================
+ 
+void mouseReleased() {
+  dragging = false;
+}
+ 
+// ================================================================
+// MOUSE WHEEL
+// ================================================================
+ 
+void mouseWheel(float amount) {
+  zoom *= pow(0.92f, amount);
+  zoom = constrain(zoom, 0.30f, 2.2f);
+}
+ 
+// ================================================================
+// PREVIOUS MODE
+// ================================================================
+ 
+void previousMode() {
+  mode--;
+  if (mode < 0) mode = 7;
+  animT = 0;
+}
+ 
+// ================================================================
+// NEXT MODE
+// ================================================================
+ 
+void nextMode() {
+  mode++;
+  if (mode > 7) mode = 0;
+  animT = 0;
+}
+ 
+// ================================================================
+// KEYBOARD
+// ================================================================
+ 
+void keyPressed() {
+  if (key == ' ') {
+    playing = !playing;  
+  }
+  if (key >= '0' && key <= '7') {
+    mode = key - '0';  
+    animT = 0;  
+  }
+  if (keyCode == RIGHT) {
+    nextMode();  
+  }
+  if (keyCode == LEFT) {
+    previousMode();  
+  }
+  if (key == 's' || key == 'S') {
+    showSurface = !showSurface;  
+  }
+  if (key == 'p' || key == 'P') {
+    showProjection = !showProjection;  
+  }
+  if (key == 'f' || key == 'F') {
+    showFences = !showFences;  
+  }
+  if (key == 'a' || key == 'A') {
+    showAxes = !showAxes;  
+  }
+  if (key == 't' || key == 'T') {
+    showText = !showText;  
+  }
+  if (key == 'r' || key == 'R') {
+    buildCurve();  
+    calculateRiemannSums();  
+    calculateHighResolutionValues();  
+    animT = 0;  
+  }
+  if (key == '+') {
+    N += 20;  
+    N = min(N, 400);  
+    sliderN = constrain((N - 20) / 180.0f, 0, 1);  
+    initializeArrays();  
+    calculateRiemannSums();  
+  }
+  if (key == '-') {
+    N -= 20;  
+    N = max(N, 20);  
+    sliderN = constrain((N - 20) / 180.0f, 0, 1);  
+    initializeArrays();  
+    calculateRiemannSums();  
+  }
+  if (key == 'z') {
+    zoom *= 1.1f;  
+  }
+  if (key == 'x') {
+    zoom /= 1.1f;  
+  }
+}
+ 
+// ================================================================
+// ANDROID TOUCH
+// ================================================================
+ 
+void touchStarted() {
+  lastX = mouseX;
+  lastY = mouseY;
+  dragging = true;
+ 
+  if (mouseY > height - 80 && mouseY < height - 20) {
+    if (mouseX >= 20 && mouseX <= 170) {  
+      previousMode();  
+      dragging = false;  
+      return;  
+    }  
+    if (mouseX >= 180 && mouseX <= 330) {  
+      nextMode();  
+      dragging = false;  
+      return;  
+    }  
+    if (mouseX >= 340 && mouseX <= 465) {  
+      playing = !playing;  
+      dragging = false;  
+      return;  
+    }  
+  }
+ 
+  if (mouseY > height - 90 && mouseY < height - 45) {
+    updateSlider(mouseX);  
+    dragging = false;  
+  }
+}
+ 
+// ================================================================
+// TOUCH MOVED
+// ================================================================
+ 
+void touchMoved() {
+  if (mouseY > height - 90 && mouseY < height - 45) {
+    updateSlider(mouseX);  
+    return;  
+  }
+ 
+  float dx = mouseX - lastX;
+  float dy = mouseY - lastY;
+  rotY += dx * 0.008f;
+  rotX += dy * 0.008f;
+  
+  lastX = mouseX;
+  lastY = mouseY;
+}
+ 
+// ================================================================
+// TOUCH ENDED
+// ================================================================
+ 
+void touchEnded() {
+  dragging = false;
+} 
